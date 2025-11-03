@@ -96,8 +96,7 @@ def inception_v3(pretrained, freeze, **kwargs):
         return model
     
     model = Inception3(**kwargs)
-    if hasattr(torch.backends, "cudnn") and torch.backends.cudnn.is_available():
-        torch.backends.cudnn.benchmark = True
+    
     if hasattr(torch, "compile"):
         model = torch.compile(model)
 
