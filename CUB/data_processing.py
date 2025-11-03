@@ -49,6 +49,7 @@ def extract_data(data_dir):
     train_data, val_data = [], []
     folder_list = [f for f in listdir(data_path) if isdir(join(data_path, f))]
     folder_list.sort() #sort by class index
+
     for i, folder in enumerate(folder_list):
         folder_path = join(data_path, folder)
         classfile_list = [cf for cf in listdir(folder_path) if (isfile(join(folder_path,cf)) and cf[0] != '.')]
@@ -59,13 +60,10 @@ def extract_data(data_dir):
             metadata = {'id': img_id, 'img_path': img_path, 'class_label': i,
                       'attribute_label': attribute_labels_all[img_id], 'attribute_certainty': attribute_certainties_all[img_id],
                       'uncertain_attribute_label': attribute_uncertain_labels_all[img_id]}
+            
+            #! addition
             if is_train_test[img_id]:
                 train_val_data.append(metadata)
-                if val_files is not None:
-                    if img_path in val_files:
-                        val_data.append(metadata)
-                    else:
-                        train_data.append(metadata)
             else:
                 test_data.append(metadata)
 
