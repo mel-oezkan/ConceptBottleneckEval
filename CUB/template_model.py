@@ -94,8 +94,14 @@ def inception_v3(pretrained, freeze, **kwargs):
                 if 'fc' not in name:  # and 'Mixed_7c' not in name:
                     param.requires_grad = False
         return model
+    
+    model = Inception3(**kwargs)
+    if hasattr(torch.backends, "cudnn") and torch.backends.cudnn.is_available():
+        torch.backends.cudnn.benchmark = True
+    if hasattr(torch, "compile"):
+        model = torch.compile(model)
 
-    return Inception3(**kwargs)
+    return model
 
 
 class Inception3(nn.Module):
@@ -389,7 +395,6 @@ class InceptionD(nn.Module):
 
 
 class InceptionE(nn.Module):
-
     def __init__(self, in_channels):
         super(InceptionE, self).__init__()
         self.branch1x1 = BasicConv2d(in_channels, 320, kernel_size=1)
