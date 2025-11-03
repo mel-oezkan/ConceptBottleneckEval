@@ -99,6 +99,7 @@ def extract_data(data_dir):
     split = int(val_ratio * len(train_val_data))
     train_data = train_val_data[split:]
     val_data = train_val_data[:split]
+    
     print("Size of train set:", len(train_data))
     return train_data, val_data, test_data
 
