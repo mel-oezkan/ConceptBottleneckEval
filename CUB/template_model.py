@@ -45,6 +45,7 @@ class VGG16Net(nn.Module):
         connect_CY=False,
         transform_input=False,
         freeze=False,
+        pretrained=True,
     ):
         super().__init__()
         # backbone
