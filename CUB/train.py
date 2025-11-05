@@ -5,6 +5,10 @@ import pdb
 import os
 import sys
 import argparse
+from typing import Dict
+
+from APN.apn_loss import ProtoModLoss
+from CUB.template_model import End2EndModel
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import math
@@ -49,7 +53,7 @@ def run_epoch_simple(model, optimizer, loader, loss_meter, acc_meter, criterion,
             optimizer.step() #optimizer step to update parameters
     return loss_meter, acc_meter
 
-def run_epoch(model, optimizer, loader, loss_meter, acc_meter, criterion, attr_criterion, args, is_training):
+def run_epoch(model, optimizer, loader, loss_meter, acc_meter, criterion, attr_criterion, protomod_criterion: ProtoModLoss, args, is_training):
     """
     For the rest of the networks (X -> A, cotraining, simple finetune)
     """
@@ -80,7 +84,7 @@ def run_epoch(model, optimizer, loader, loss_meter, acc_meter, criterion, attr_c
         labels_var = labels_var.cuda() if torch.cuda.is_available() else labels_var
 
         if is_training and args.use_aux:
-            outputs, aux_outputs = model(inputs_var)
+            outputs, similarity_scores, attention_maps, aux_outputs = model(inputs_var)
             losses = []
             out_start = 0
             if not args.bottleneck: #loss main is for the main task label (always the first output)
@@ -91,8 +95,10 @@ def run_epoch(model, optimizer, loader, loss_meter, acc_meter, criterion, attr_c
                 for i in range(len(attr_criterion)):
                     losses.append(args.attr_loss_weight * (1.0 * attr_criterion[i](outputs[i+out_start].squeeze().type(torch.cuda.FloatTensor), attr_labels_var[:, i]) \
                                                             + 0.4 * attr_criterion[i](aux_outputs[i+out_start].squeeze().type(torch.cuda.FloatTensor), attr_labels_var[:, i])))
+                    
+            losses.append(protomod_criterion(similarity_scores, attention_maps, attr_labels_var))
         else: #testing or no aux logits
-            outputs = model(inputs_var)
+            outputs, similarity_scores, attention_maps, = model(inputs_var)
             losses = []
             out_start = 0
             if not args.bottleneck:
@@ -103,6 +109,8 @@ def run_epoch(model, optimizer, loader, loss_meter, acc_meter, criterion, attr_c
                 for i in range(len(attr_criterion)):
                     losses.append(args.attr_loss_weight * attr_criterion[i](outputs[i+out_start].squeeze().type(torch.cuda.FloatTensor), attr_labels_var[:, i]))
 
+            losses.append(protomod_criterion(similarity_scores, attention_maps, attr_labels_var))
+            
         if args.bottleneck: #attribute accuracy
             sigmoid_outputs = torch.nn.Sigmoid()(torch.cat(outputs, dim=1))
             acc = binary_accuracy(sigmoid_outputs, attr_labels)
@@ -150,18 +158,21 @@ def train(model, args):
 
     model = model.cuda()
     criterion = torch.nn.CrossEntropyLoss()
-    if args.use_attr and not args.no_img:
-        attr_criterion = [] #separate criterion (loss function) for each attribute
-        if args.weighted_loss:
-            assert(imbalance is not None)
-            for ratio in imbalance:
-                attr_criterion.append(torch.nn.BCEWithLogitsLoss(weight=torch.FloatTensor([ratio]).cuda()))
-        else:
-            for i in range(args.n_attributes):
-                attr_criterion.append(torch.nn.CrossEntropyLoss())
-    else:
-        attr_criterion = None
-
+    # if args.use_attr and not args.no_img:
+    #     attr_criterion = [] #separate criterion (loss function) for each attribute
+    #     if args.weighted_loss:
+    #         assert(imbalance is not None)
+    #         for ratio in imbalance:
+    #             attr_criterion.append(torch.nn.BCEWithLogitsLoss(weight=torch.FloatTensor([ratio]).cuda()))
+    #     else:
+    #         for i in range(args.n_attributes):
+    #             attr_criterion.append(torch.nn.CrossEntropyLoss())
+    # else:
+    attr_criterion = None
+    reg_weights = {}
+    use_groups = True
+    protomod_criterion = ProtoModLoss(model.protomod, reg_weights, use_groups)
+    
     if args.optimizer == 'Adam':
         optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr, weight_decay=args.weight_decay)
     elif args.optimizer == 'RMSprop':
@@ -196,7 +207,7 @@ def train(model, args):
         if args.no_img:
             train_loss_meter, train_acc_meter = run_epoch_simple(model, optimizer, train_loader, train_loss_meter, train_acc_meter, criterion, args, is_training=True)
         else:
-            train_loss_meter, train_acc_meter = run_epoch(model, optimizer, train_loader, train_loss_meter, train_acc_meter, criterion, attr_criterion, args, is_training=True)
+            train_loss_meter, train_acc_meter = run_epoch(model, optimizer, train_loader, train_loss_meter, train_acc_meter, criterion, attr_criterion, protomod_criterion, args, is_training=True)
  
         if not args.ckpt: # evaluate on val set
             val_loss_meter = AverageMeter()
@@ -206,7 +217,7 @@ def train(model, args):
                 if args.no_img:
                     val_loss_meter, val_acc_meter = run_epoch_simple(model, optimizer, val_loader, val_loss_meter, val_acc_meter, criterion, args, is_training=False)
                 else:
-                    val_loss_meter, val_acc_meter = run_epoch(model, optimizer, val_loader, val_loss_meter, val_acc_meter, criterion, attr_criterion, args, is_training=False)
+                    val_loss_meter, val_acc_meter = run_epoch(model, optimizer, val_loader, val_loss_meter, val_acc_meter, criterion, attr_criterion, protomod_criterion, args, is_training=False)
 
         else: #retraining
             val_loss_meter = train_loss_meter

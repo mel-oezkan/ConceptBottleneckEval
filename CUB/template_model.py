@@ -2,6 +2,7 @@
 InceptionV3 Network modified from https://github.com/pytorch/vision/blob/master/torchvision/models/inception.py
 New changes: add softmax layer + option for freezing lower layers except fc
 """
+
 import os
 import torch
 import torch.nn as nn
@@ -9,45 +10,48 @@ from torch.nn import Parameter
 import torch.nn.functional as F
 import torch.utils.model_zoo as model_zoo
 
-__all__ = ['MLP', 'Inception3', 'inception_v3', 'End2EndModel']
+from APN.protomod import ProtoMod
+
+__all__ = ["MLP", "Inception3", "inception_v3", "End2EndModel"]
 
 model_urls = {
     # Downloaded inception model (optional)
-    'downloaded': 'pretrained/inception_v3_google-1a9a5a14.pth',
+    "downloaded": "pretrained/inception_v3_google-1a9a5a14.pth",
     # Inception v3 ported from TensorFlow
-    'inception_v3_google': 'https://download.pytorch.org/models/inception_v3_google-1a9a5a14.pth',
+    "inception_v3_google": "https://download.pytorch.org/models/inception_v3_google-1a9a5a14.pth",
 }
 
 
 class End2EndModel(torch.nn.Module):
-    def __init__(self, model1, model2, use_relu=False, use_sigmoid=False, n_class_attr=2):
+    def __init__(
+        self, model1, model2, use_relu=False, use_sigmoid=False, n_class_attr=2
+    ):
         super(End2EndModel, self).__init__()
         self.first_model = model1
         self.sec_model = model2
         self.use_relu = use_relu
         self.use_sigmoid = use_sigmoid
+        self.protomod = model1.protomod
 
     def forward_stage2(self, stage1_out):
         if self.use_relu:
-            attr_outputs = [nn.ReLU()(o) for o in stage1_out]
+            attr_outputs = F.relu(stage1_out)
         elif self.use_sigmoid:
-            attr_outputs = [torch.nn.Sigmoid()(o) for o in stage1_out]
+            attr_outputs = F.sigmoid(stage1_out)
         else:
             attr_outputs = stage1_out
 
-        stage2_inputs = attr_outputs
-        stage2_inputs = torch.cat(stage2_inputs, dim=1)
-        all_out = [self.sec_model(stage2_inputs)]
+        all_out = [self.sec_model(attr_outputs)]
         all_out.extend(stage1_out)
         return all_out
 
     def forward(self, x):
         if self.first_model.training:
-            outputs, aux_outputs = self.first_model(x)
-            return self.forward_stage2(outputs), self.forward_stage2(aux_outputs)
+            similarity_scores, attention_maps, aux_outputs = self.first_model(x)
+            return self.forward_stage2(similarity_scores), similarity_scores, attention_maps, self.forward_stage2(aux_outputs)
         else:
-            outputs = self.first_model(x)
-            return self.forward_stage2(outputs)
+            similarity_scores, attention_maps = self.first_model(x)
+            return self.forward_stage2(similarity_scores), similarity_scores, attention_maps
 
 
 class MLP(nn.Module):
@@ -57,12 +61,14 @@ class MLP(nn.Module):
         if self.expand_dim:
             self.linear = nn.Linear(input_dim, expand_dim)
             self.activation = torch.nn.ReLU()
-            self.linear2 = nn.Linear(expand_dim, num_classes) #softmax is automatically handled by loss function
+            self.linear2 = nn.Linear(
+                expand_dim, num_classes
+            )  # softmax is automatically handled by loss function
         self.linear = nn.Linear(input_dim, num_classes)
 
     def forward(self, x):
         x = self.linear(x)
-        if hasattr(self, 'expand_dim') and self.expand_dim:
+        if hasattr(self, "expand_dim") and self.expand_dim:
             x = self.activation(x)
             x = self.linear2(x)
         return x
@@ -82,16 +88,18 @@ def inception_v3(pretrained, freeze, **kwargs):
             was trained on ImageNet. Default: *False*
     """
     if pretrained:
-        if 'transform_input' not in kwargs:
-            kwargs['transform_input'] = True
+        if "transform_input" not in kwargs:
+            kwargs["transform_input"] = True
         model = Inception3(**kwargs)
-        if os.path.exists(model_urls.get('downloaded')):
-            model.load_partial_state_dict(torch.load(model_urls['downloaded']))
+        if os.path.exists(model_urls.get("downloaded")):
+            model.load_partial_state_dict(torch.load(model_urls["downloaded"]))
         else:
-            model.load_partial_state_dict(model_zoo.load_url(model_urls['inception_v3_google']))
+            model.load_partial_state_dict(
+                model_zoo.load_url(model_urls["inception_v3_google"])
+            )
         if freeze:  # only finetune fc layer
             for name, param in model.named_parameters():
-                if 'fc' not in name:  # and 'Mixed_7c' not in name:
+                if "fc" not in name:  # and 'Mixed_7c' not in name:
                     param.requires_grad = False
         return model
 
@@ -99,8 +107,17 @@ def inception_v3(pretrained, freeze, **kwargs):
 
 
 class Inception3(nn.Module):
-
-    def __init__(self, num_classes, aux_logits=True, transform_input=False, n_attributes=0, bottleneck=False, expand_dim=0, three_class=False, connect_CY=False):
+    def __init__(
+        self,
+        num_classes,
+        aux_logits=True,
+        transform_input=False,
+        n_attributes=0,
+        bottleneck=False,
+        expand_dim=0,
+        three_class=False,
+        connect_CY=False,
+    ):
         """
         Args:
         num_classes: number of main task classes
@@ -130,31 +147,32 @@ class Inception3(nn.Module):
         self.Mixed_6d = InceptionC(768, channels_7x7=160)
         self.Mixed_6e = InceptionC(768, channels_7x7=192)
         if aux_logits:
-            self.AuxLogits = InceptionAux(768, num_classes, n_attributes=self.n_attributes, bottleneck=bottleneck, \
-                                                expand_dim=expand_dim, three_class=three_class, connect_CY=connect_CY)
+            self.AuxLogits = InceptionAux(
+                768,
+                num_classes,
+                n_attributes=self.n_attributes,
+                bottleneck=bottleneck,
+                expand_dim=expand_dim,
+                three_class=three_class,
+                connect_CY=connect_CY,
+            )
+        final_channels = 2048
         self.Mixed_7a = InceptionD(768)
         self.Mixed_7b = InceptionE(1280)
-        self.Mixed_7c = InceptionE(2048)
+        self.Mixed_7c = InceptionE(final_channels)
 
-        self.all_fc = nn.ModuleList() #separate fc layer for each prediction task. If main task is involved, it's always the first fc in the list
+        self.protomod = ProtoMod(channel_dim=final_channels, kernel_size=8)
 
         if connect_CY:
             self.cy_fc = FC(n_attributes, num_classes, expand_dim)
         else:
             self.cy_fc = None
 
-        if self.n_attributes > 0:
-            if not bottleneck: #multitasking
-                self.all_fc.append(FC(2048, num_classes, expand_dim))
-            for i in range(self.n_attributes):
-                self.all_fc.append(FC(2048, 1, expand_dim))
-        else:
-            self.all_fc.append(FC(2048, num_classes, expand_dim))
-
         for m in self.modules():
             if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
                 import scipy.stats as stats
-                stddev = m.stddev if hasattr(m, 'stddev') else 0.1
+
+                stddev = m.stddev if hasattr(m, "stddev") else 0.1
                 X = stats.truncnorm(-2, 2, scale=stddev)
                 values = torch.as_tensor(X.rvs(m.weight.numel()), dtype=m.weight.dtype)
                 values = values.view(m.weight.size())
@@ -210,23 +228,13 @@ class Inception3(nn.Module):
         # N x 2048 x 8 x 8
         x = self.Mixed_7c(x)
         # N x 2048 x 8 x 8
-        # Adaptive average pooling
-        x = F.adaptive_avg_pool2d(x, (1, 1))
-        # N x 2048 x 1 x 1
-        x = F.dropout(x, training=self.training)
-        # N x 2048 x 1 x 1
-        x = x.view(x.size(0), -1)
-        # N x 2048
-        out = []
-        for fc in self.all_fc:
-            out.append(fc(x))
-        if self.n_attributes > 0 and not self.bottleneck and self.cy_fc is not None:
-            attr_preds = torch.cat(out[1:], dim=1)
-            out[0] += self.cy_fc(attr_preds)
+        # ---- APN INTEGRATION ----
+        similarity_scores, attention_maps = self.protomod(x)
+
         if self.training and self.aux_logits:
-            return out, out_aux
+            return similarity_scores, attention_maps, out_aux
         else:
-            return out
+            return similarity_scores, attention_maps
 
     def load_partial_state_dict(self, state_dict):
         """
@@ -234,7 +242,7 @@ class Inception3(nn.Module):
         """
         own_state = self.state_dict()
         for name, param in state_dict.items():
-            if name not in own_state or 'fc' in name:
+            if name not in own_state or "fc" in name:
                 continue
             if isinstance(param, Parameter):
                 param = param.data
@@ -242,7 +250,6 @@ class Inception3(nn.Module):
 
 
 class FC(nn.Module):
-
     def __init__(self, input_dim, output_dim, expand_dim, stddev=None):
         """
         Extend standard Torch Linear layer to include the option of expanding into 2 Linear layers
@@ -269,7 +276,6 @@ class FC(nn.Module):
 
 
 class InceptionA(nn.Module):
-
     def __init__(self, in_channels, pool_features):
         super(InceptionA, self).__init__()
         self.branch1x1 = BasicConv2d(in_channels, 64, kernel_size=1)
@@ -301,7 +307,6 @@ class InceptionA(nn.Module):
 
 
 class InceptionB(nn.Module):
-
     def __init__(self, in_channels):
         super(InceptionB, self).__init__()
         self.branch3x3 = BasicConv2d(in_channels, 384, kernel_size=3, stride=2)
@@ -324,7 +329,6 @@ class InceptionB(nn.Module):
 
 
 class InceptionC(nn.Module):
-
     def __init__(self, in_channels, channels_7x7):
         super(InceptionC, self).__init__()
         self.branch1x1 = BasicConv2d(in_channels, 192, kernel_size=1)
@@ -363,7 +367,6 @@ class InceptionC(nn.Module):
 
 
 class InceptionD(nn.Module):
-
     def __init__(self, in_channels):
         super(InceptionD, self).__init__()
         self.branch3x3_1 = BasicConv2d(in_channels, 192, kernel_size=1)
@@ -389,7 +392,6 @@ class InceptionD(nn.Module):
 
 
 class InceptionE(nn.Module):
-
     def __init__(self, in_channels):
         super(InceptionE, self).__init__()
         self.branch1x1 = BasicConv2d(in_channels, 320, kernel_size=1)
@@ -431,8 +433,16 @@ class InceptionE(nn.Module):
 
 
 class InceptionAux(nn.Module):
-
-    def __init__(self, in_channels, num_classes, n_attributes=0, bottleneck=False, expand_dim=0, three_class=False, connect_CY=False):
+    def __init__(
+        self,
+        in_channels,
+        num_classes,
+        n_attributes=0,
+        bottleneck=False,
+        expand_dim=0,
+        three_class=False,
+        connect_CY=False,
+    ):
         super(InceptionAux, self).__init__()
         self.conv0 = BasicConv2d(in_channels, 128, kernel_size=1)
         self.conv1 = BasicConv2d(128, 768, kernel_size=5)
@@ -449,7 +459,7 @@ class InceptionAux(nn.Module):
         self.all_fc = nn.ModuleList()
 
         if n_attributes > 0:
-            if not bottleneck: #cotraining
+            if not bottleneck:  # cotraining
                 self.all_fc.append(FC(768, num_classes, expand_dim, stddev=0.001))
             for i in range(self.n_attributes):
                 self.all_fc.append(FC(768, 1, expand_dim, stddev=0.001))
@@ -479,7 +489,6 @@ class InceptionAux(nn.Module):
 
 
 class BasicConv2d(nn.Module):
-
     def __init__(self, in_channels, out_channels, **kwargs):
         super(BasicConv2d, self).__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, bias=False, **kwargs)
