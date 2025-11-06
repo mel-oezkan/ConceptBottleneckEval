@@ -63,7 +63,7 @@ def run_epoch(model, optimizer, loader, loss_meter, acc_meter, criterion, attr_c
         model.eval()
 
     for _, data in enumerate(loader):
-        if attr_criterion is None:
+        if attr_criterion is None and protomod_criterion is None:
             inputs, labels = data
             attr_labels, attr_labels_var = None, None
         else:
@@ -169,7 +169,13 @@ def train(model, args):
     #             attr_criterion.append(torch.nn.CrossEntropyLoss())
     # else:
     attr_criterion = None
-    reg_weights = {}
+    
+    # Weights from the APN paper
+    reg_weights = {
+        "attribute_reg": 1.0,
+        "cpt": 1e-9,
+        "decorrelation": 4e-2,
+    }
     use_groups = True
     protomod_criterion = ProtoModLoss(model.protomod, reg_weights, use_groups)
     

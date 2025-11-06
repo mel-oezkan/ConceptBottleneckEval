@@ -48,6 +48,8 @@ class End2EndModel(torch.nn.Module):
     def forward(self, x):
         if self.first_model.training:
             similarity_scores, attention_maps, aux_outputs = self.first_model(x)
+            # TODO: Remove
+            print(aux_outputs.shape)
             return self.forward_stage2(similarity_scores), similarity_scores, attention_maps, self.forward_stage2(aux_outputs)
         else:
             similarity_scores, attention_maps = self.first_model(x)
@@ -485,7 +487,8 @@ class InceptionAux(nn.Module):
         if self.n_attributes > 0 and not self.bottleneck and self.cy_fc is not None:
             attr_preds = torch.cat(out[1:], dim=1)
             out[0] += self.cy_fc(attr_preds)
-        return out
+            
+        return torch.cat(out, dim=1)
 
 
 class BasicConv2d(nn.Module):

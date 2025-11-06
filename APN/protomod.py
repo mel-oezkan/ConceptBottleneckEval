@@ -8,14 +8,14 @@ class ProtoMod(nn.Module):
         super(ProtoMod, self).__init__()
         self.kernel_size = kernel_size
 
-        prototype_shape = [312, channel_dim, 1, 1]
+        prototype_shape = [112, channel_dim, 1, 1]
         self.prototype_vectors = nn.Parameter(
             2e-4 * torch.rand(prototype_shape), requires_grad=True
         )
 
         self.softmax = nn.Softmax(dim=1)
 
-    def forward(self, x, attributes):
+    def forward(self, x):
         batch_size = x.shape[0]
 
         attention_map = F.conv2d(

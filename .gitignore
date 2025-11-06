@@ -4,3 +4,7 @@
 *pyc
 .idea/
 .vscode/
+data/
+outputs
+models
+CUB_200_2011/
