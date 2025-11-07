@@ -7,7 +7,13 @@ requires-python = ">=3.12"
 dependencies = [
     "matplotlib>=3.10.7",
     "numpy>=2.3.4",
+    "pandas>=2.3.3",
     "scikit-learn>=1.7.2",
     "torch>=2.9.0",
     "torch-vision>=0.1.6.dev0",
+]
+
+[dependency-groups]
+dev = [
+    "jupyterlab>=4.4.10",
 ]
