@@ -126,6 +126,33 @@ class ImbalancedDatasetSampler(torch.utils.data.sampler.Sampler):
 
     def __len__(self):
         return self.num_samples
+    
+
+class ImageTransformer:
+    """
+    Apply standard ImageNet transformations to the input image
+    """
+
+    def __init__(self, is_training=True, resol=224):
+        resized_resol = int(resol * 256/224)
+        if is_training:
+            self.transform = transforms.Compose([
+                transforms.Resize((resized_resol, resized_resol)),
+                transforms.RandomResizedCrop(resol),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(), #implicitly divides by 255
+                transforms.Normalize(mean = [ 0.485, 0.456, 0.406 ], std = [ 0.229, 0.224, 0.225 ]),
+            ])
+        else:
+            self.transform = transforms.Compose([
+                transforms.Resize((resized_resol, resized_resol)),
+                transforms.CenterCrop(resol),
+                transforms.ToTensor(), #implicitly divides by 255
+                transforms.Normalize(mean = [ 0.485, 0.456, 0.406 ], std = [ 0.229, 0.224, 0.225 ]),
+            ])
+
+    def __call__(self, img):
+        return self.transform(img)
 
 def load_data(pkl_paths, use_attr, no_img, batch_size, uncertain_label=False, n_class_attr=2, image_dir='images', resampling=False, resol=299):
     """
@@ -136,24 +163,9 @@ def load_data(pkl_paths, use_attr, no_img, batch_size, uncertain_label=False, n_
     resized_resol = int(resol * 256/224)
     is_training = any(['train.pkl' in f for f in pkl_paths])
     if is_training:
-        transform = transforms.Compose([
-            #transforms.Resize((resized_resol, resized_resol)),
-            #transforms.RandomSizedCrop(resol),
-            transforms.ColorJitter(brightness=32/255, saturation=(0.5, 1.5)),
-            transforms.RandomResizedCrop(resol),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(), #implicitly divides by 255
-            transforms.Normalize(mean = [0.5, 0.5, 0.5], std = [2, 2, 2])
-            #transforms.Normalize(mean = [ 0.485, 0.456, 0.406 ], std = [ 0.229, 0.224, 0.225 ]),
-            ])
+        transform = ImageTransformer(is_training=True, resol=resol)
     else:
-        transform = transforms.Compose([
-            #transforms.Resize((resized_resol, resized_resol)),
-            transforms.CenterCrop(resol),
-            transforms.ToTensor(), #implicitly divides by 255
-            transforms.Normalize(mean = [0.5, 0.5, 0.5], std = [2, 2, 2])
-            #transforms.Normalize(mean = [ 0.485, 0.456, 0.406 ], std = [ 0.229, 0.224, 0.225 ]),
-            ])
+        transform = ImageTransformer(is_training=False, resol=resol)
 
     dataset = CUBDataset(pkl_paths, use_attr, no_img, uncertain_label, image_dir, n_class_attr, transform)
     if is_training:
