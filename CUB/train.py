@@ -96,7 +96,8 @@ def run_epoch(model, optimizer, loader, loss_meter, acc_meter, criterion, attr_c
                     losses.append(args.attr_loss_weight * (1.0 * attr_criterion[i](outputs[i+out_start].squeeze().type(torch.cuda.FloatTensor), attr_labels_var[:, i]) \
                                                             + 0.4 * attr_criterion[i](aux_outputs[i+out_start].squeeze().type(torch.cuda.FloatTensor), attr_labels_var[:, i])))
                     
-            losses.append(protomod_criterion(similarity_scores, attention_maps, attr_labels_var))
+            loss, _, _, _ = protomod_criterion(similarity_scores, attention_maps, attr_labels_var)
+            losses.append(loss)
         else: #testing or no aux logits
             outputs, similarity_scores, attention_maps, = model(inputs_var)
             losses = []
@@ -109,7 +110,8 @@ def run_epoch(model, optimizer, loader, loss_meter, acc_meter, criterion, attr_c
                 for i in range(len(attr_criterion)):
                     losses.append(args.attr_loss_weight * attr_criterion[i](outputs[i+out_start].squeeze().type(torch.cuda.FloatTensor), attr_labels_var[:, i]))
 
-            losses.append(protomod_criterion(similarity_scores, attention_maps, attr_labels_var))
+            loss, _, _, _ = protomod_criterion(similarity_scores, attention_maps, attr_labels_var)
+            losses.append(loss)
             
         if args.bottleneck: #attribute accuracy
             sigmoid_outputs = torch.nn.Sigmoid()(torch.cat(outputs, dim=1))

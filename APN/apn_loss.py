@@ -3,7 +3,7 @@ import torch
 from torch import nn, zeros_like
 import torch.nn.functional as F
 
-from APN.apn_consts import CUB_ATTRIBUTES_PER_GROUP, CUB_GROUPS
+from APN.apn_consts import CUB_SELECTED_ATTRIBUTES_PER_GROUP, CUB_GROUPS
 from APN.apn_utils import add_glasso, get_middle_graph
 from APN.protomod import ProtoMod
 
@@ -22,7 +22,7 @@ class ProtoModLoss(nn.Module):
 
         # To calculate regularization among groups
         self.groups = CUB_GROUPS
-        self.attributes_per_group = CUB_ATTRIBUTES_PER_GROUP
+        self.attributes_per_group = CUB_SELECTED_ATTRIBUTES_PER_GROUP
 
     def forward(
         self,
