@@ -133,7 +133,7 @@ class ImageTransformer:
     Apply standard ImageNet transformations to the input image
     """
 
-    def __init__(self, is_training=True, resol=224):
+    def __init__(self, is_training=True, resol=299):
         resized_resol = int(resol * 256/224)
         if is_training:
             self.transform = transforms.Compose([
