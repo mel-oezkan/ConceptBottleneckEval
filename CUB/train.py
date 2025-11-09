@@ -6,6 +6,7 @@ import os
 import sys
 import argparse
 from typing import Dict
+import time
 
 from APN.apn_loss import ProtoModLoss
 from CUB.template_model import End2EndModel
@@ -210,6 +211,7 @@ def train(model, args):
     best_val_acc = 0
 
     for epoch in range(0, args.epochs):
+        start_time = time.time()
         train_loss_meter = AverageMeter()
         train_acc_meter = AverageMeter()
         if args.no_img:
@@ -242,10 +244,11 @@ def train(model, args):
         train_loss_avg = train_loss_meter.avg
         val_loss_avg = val_loss_meter.avg
         
+        time_duration = time.time() - start_time
         logger.write('Epoch [%d]:\tTrain loss: %.4f\tTrain accuracy: %.4f\t'
                 'Val loss: %.4f\tVal acc: %.4f\t'
-                'Best val epoch: %d\n'
-                % (epoch, train_loss_avg, train_acc_meter.avg, val_loss_avg, val_acc_meter.avg, best_val_epoch)) 
+                'Best val epoch: %d\n' 'Time: %.2f sec\n'
+                % (epoch, train_loss_avg, train_acc_meter.avg, val_loss_avg, val_acc_meter.avg, best_val_epoch, time_duration)) 
         logger.flush()
         
         if epoch <= stop_epoch:
