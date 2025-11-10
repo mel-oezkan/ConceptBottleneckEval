@@ -24,6 +24,13 @@ class ProtoModLoss(nn.Module):
         self.groups = CUB_GROUPS
         self.attributes_per_group = CUB_SELECTED_ATTRIBUTES_PER_GROUP
 
+        # Precompute group attribute indices as tensors for faster indexing
+        if use_groups:
+            self.group_attr_indices = [
+                torch.tensor(self.attributes_per_group[group], dtype=torch.long)
+                for group in self.groups[:-1]
+            ]
+
     def forward(
         self,
         similarity_scores: torch.Tensor,
@@ -54,12 +61,10 @@ class ProtoModLoss(nn.Module):
         if self.use_groups:
             # L_AD in the APN paper: Attribute decorrelation loss
             decorrelation_loss = zeros_like(cpt_loss)
-            for group in self.groups[:-1]:
-                group_attributes = self.attributes_per_group[group]
-
+            for group_attr_idx in self.group_attr_indices:
                 # Only selects prototypes that are relevant for this group - Enforces competition per group
                 decorrelation_loss += self.reg_weights["decorrelation"] * add_glasso(
-                    prototypes, group_attributes
+                    prototypes, group_attr_idx
                 )
             loss += decorrelation_loss
         else:
