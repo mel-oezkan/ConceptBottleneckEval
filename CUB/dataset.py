@@ -167,10 +167,9 @@ def load_data(pkl_paths, use_attr, no_img, batch_size, uncertain_label=False, n_
         loader = DataLoader(
             dataset, 
             batch_sampler=sampler,
-            num_workers=6,  # A100 has high throughput, use 4-8 workers
-            pin_memory=True,  # Essential for faster GPU transfer
+            num_workers=4,  # Multi-process data loading
+            pin_memory=True,  # Faster GPU transfer
             persistent_workers=True,  # Keep workers alive between epochs
-            prefetch_factor=2,  # Prefetch 2 batches per worker
         )
     else:
         loader = DataLoader(
@@ -178,10 +177,9 @@ def load_data(pkl_paths, use_attr, no_img, batch_size, uncertain_label=False, n_
             batch_size=batch_size, 
             shuffle=shuffle, 
             drop_last=drop_last,
-            num_workers=6,  # A100 has high throughput, use 4-8 workers
-            pin_memory=True,  # Essential for faster GPU transfer
+            num_workers=4,  # Multi-process data loading
+            pin_memory=True,  # Faster GPU transfer
             persistent_workers=True,  # Keep workers alive between epochs
-            prefetch_factor=2,  # Prefetch 2 batches per worker
         )
     return loader
 
