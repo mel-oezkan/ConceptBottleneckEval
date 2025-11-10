@@ -167,9 +167,9 @@ def load_data(pkl_paths, use_attr, no_img, batch_size, uncertain_label=False, n_
         loader = DataLoader(
             dataset, 
             batch_sampler=sampler,
-    #             num_workers=4,  # Multi-process data loading
-    # pin_memory=True,  # Faster GPU transfer
-    # persistent_workers=True,  # Keep workers alive between epochs
+            # num_workers=4,  # Multi-process data loading
+            # pin_memory=True,  # Faster GPU transfer
+            # persistent_workers=True,  # Keep workers alive between epochs
         )
     else:
         loader = DataLoader(
@@ -177,9 +177,9 @@ def load_data(pkl_paths, use_attr, no_img, batch_size, uncertain_label=False, n_
             batch_size=batch_size, 
             shuffle=shuffle, 
             drop_last=drop_last,
-    #             num_workers=4,  # Multi-process data loading
-    # pin_memory=True,  # Faster GPU transfer
-    # persistent_workers=True,  # Keep workers alive between epochs´
+            # num_workers=4,  # Multi-process data loading
+            # pin_memory=True,  # Faster GPU transfer
+            # persistent_workers=True,  # Keep workers alive between epochs´
         )
     return loader
 
@@ -213,6 +213,7 @@ def find_class_imbalance(pkl_file, multiple_attr=False, attr_idx=-1):
                 n_ones[0] += sum(labels)
     for j in range(len(n_ones)):
         imbalance_ratio.append(total[j]/n_ones[j] - 1)
+        
     if not multiple_attr: #e.g. [9.0] --> [9.0] * 312
         imbalance_ratio *= n_attr
     return imbalance_ratio
