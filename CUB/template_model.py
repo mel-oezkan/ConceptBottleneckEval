@@ -48,11 +48,20 @@ class End2EndModel(torch.nn.Module):
     def forward(self, x):
         if self.first_model.training:
             similarity_scores, attention_maps, aux_outputs = self.first_model(x)
-            
-            return self.forward_stage2(similarity_scores), similarity_scores, attention_maps, self.forward_stage2(aux_outputs)
+
+            return (
+                self.forward_stage2(similarity_scores),
+                similarity_scores,
+                attention_maps,
+                self.forward_stage2(aux_outputs),
+            )
         else:
             similarity_scores, attention_maps = self.first_model(x)
-            return self.forward_stage2(similarity_scores), similarity_scores, attention_maps
+            return (
+                self.forward_stage2(similarity_scores),
+                similarity_scores,
+                attention_maps,
+            )
 
 
 class MLP(nn.Module):
@@ -147,6 +156,7 @@ class Inception3(nn.Module):
         self.Mixed_6c = InceptionC(768, channels_7x7=160)
         self.Mixed_6d = InceptionC(768, channels_7x7=160)
         self.Mixed_6e = InceptionC(768, channels_7x7=192)
+
         if aux_logits:
             self.AuxLogits = InceptionAux(
                 768,
@@ -486,7 +496,7 @@ class InceptionAux(nn.Module):
         if self.n_attributes > 0 and not self.bottleneck and self.cy_fc is not None:
             attr_preds = torch.cat(out[1:], dim=1)
             out[0] += self.cy_fc(attr_preds)
-            
+
         return torch.cat(out, dim=1)
 
 

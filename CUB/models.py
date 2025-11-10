@@ -46,7 +46,7 @@ def ModelXtoCtoY(
     freeze,
     num_classes,
     use_aux,
-    n_attributes,
+    n_attributes, # default should be 112 (paper)
     expand_dim,
     use_relu,
     use_sigmoid,
@@ -86,7 +86,13 @@ def ModelXtoY(pretrained, freeze, num_classes, use_aux):
 
 # Multitask Model
 def ModelXtoCY(
-    pretrained, freeze, num_classes, use_aux, n_attributes, three_class, connect_CY
+    pretrained, 
+    freeze, 
+    num_classes, 
+    use_aux, 
+    n_attributes, 
+    three_class, 
+    connect_CY
 ):
     return inception_v3(
         pretrained=pretrained,
