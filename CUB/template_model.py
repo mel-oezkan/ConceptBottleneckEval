@@ -478,13 +478,13 @@ class InceptionAux(nn.Module):
         x = F.adaptive_avg_pool2d(x, (1, 1))  # N x 768 x 1 x 1
         x = x.view(x.size(0), -1)  # N x 768
 
-        # pre-allocate the output list and fill in for loop
-        batch_size = x.size(0)
-        total_out_dim = sum(
-            1 if i > 0 else self.all_fc[0].fc.out_features
-            for i in range(len(self.all_fc))
-        )
-        out = torch.empty(batch_size, total_out_dim, device=x.device, dtype=x.dtype)
+        # todo: pre-allocate the output list and fill in for loop
+        # batch_size = x.size(0)
+        # total_out_dim = sum(
+        #     1 if i > 0 else self.all_fc[0].fc.out_features
+        #     for i in range(len(self.all_fc))
+        # )
+        # out = torch.empty(batch_size, total_out_dim, device=x.device, dtype=x.dtype)
 
         out = []
         for fc in self.all_fc:
