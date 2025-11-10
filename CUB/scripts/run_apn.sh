@@ -1,6 +1,6 @@
 python experiments.py cub Joint \
     --seed 1 \
-    -ckpt 1 \
+    -ckpt "" \
     -log_dir outputs/ \
     -e 1000 \
     -optimizer sgd \
