@@ -212,33 +212,23 @@ class Inception3(nn.Module):
         # N x 80 x 73 x 73
         x = self.Conv2d_4a_3x3(x)
         # N x 192 x 71 x 71
-        x = F.max_pool2d(x, kernel_size=3, stride=2)
-        # N x 192 x 35 x 35
-        x = self.Mixed_5b(x)
-        # N x 256 x 35 x 35
-        x = self.Mixed_5c(x)
-        # N x 288 x 35 x 35
-        x = self.Mixed_5d(x)
-        # N x 288 x 35 x 35
-        x = self.Mixed_6a(x)
-        # N x 768 x 17 x 17
-        x = self.Mixed_6b(x)
-        # N x 768 x 17 x 17
-        x = self.Mixed_6c(x)
-        # N x 768 x 17 x 17
-        x = self.Mixed_6d(x)
-        # N x 768 x 17 x 17
-        x = self.Mixed_6e(x)
-        # N x 768 x 17 x 17
+        x = F.max_pool2d(x, kernel_size=3, stride=2)  # N x 192 x 35 x 35
+        x = self.Mixed_5b(x)  # N x 256 x 35 x 35
+        x = self.Mixed_5c(x)  # N x 288 x 35 x 35
+        x = self.Mixed_5d(x)  # N x 288 x 35 x 35
+        x = self.Mixed_6a(x)  # N x 768 x 17 x 17
+        x = self.Mixed_6b(x)  # -> N x 768 x 17 x 17
+        x = self.Mixed_6c(x)  # -> N x 768 x 17 x 17
+        x = self.Mixed_6d(x)  # -> N x 768 x 17 x 17
+        x = self.Mixed_6e(x)  # -> N x 768 x 17 x 17
+
         if self.training and self.aux_logits:
             out_aux = self.AuxLogits(x)
         # N x 768 x 17 x 17
-        x = self.Mixed_7a(x)
-        # N x 1280 x 8 x 8
-        x = self.Mixed_7b(x)
-        # N x 2048 x 8 x 8
-        x = self.Mixed_7c(x)
-        # N x 2048 x 8 x 8
+        x = self.Mixed_7a(x)  # N x 1280 x 8 x 8
+        x = self.Mixed_7b(x)  # N x 2048 x 8 x 8
+        x = self.Mixed_7c(x)  # N x 2048 x 8 x 8
+
         # ---- APN INTEGRATION ----
         similarity_scores, attention_maps = self.protomod(x)
 
@@ -478,21 +468,28 @@ class InceptionAux(nn.Module):
             self.all_fc.append(FC(768, num_classes, expand_dim, stddev=0.001))
 
     def forward(self, x):
-        # N x 768 x 17 x 17
-        x = F.avg_pool2d(x, kernel_size=5, stride=3)
-        # N x 768 x 5 x 5
-        x = self.conv0(x)
-        # N x 128 x 5 x 5
-        x = self.conv1(x)
-        # N x 768 x 1 x 1
+        # input: N x 768 x 17 x 17
+        x = F.avg_pool2d(  # N x 768 x 5 x 5
+            x, kernel_size=5, stride=3
+        )
+        x = self.conv0(x)  # N x 128 x 5 x 5
+        x = self.conv1(x)  # N x 768 x 1 x 1
         # Adaptive average pooling
-        x = F.adaptive_avg_pool2d(x, (1, 1))
-        # N x 768 x 1 x 1
-        x = x.view(x.size(0), -1)
-        # N x 768
+        x = F.adaptive_avg_pool2d(x, (1, 1))  # N x 768 x 1 x 1
+        x = x.view(x.size(0), -1)  # N x 768
+
+        # pre-allocate the output list and fill in for loop
+        batch_size = x.size(0)
+        total_out_dim = sum(
+            1 if i > 0 else self.all_fc[0].fc.out_features
+            for i in range(len(self.all_fc))
+        )
+        out = torch.empty(batch_size, total_out_dim, device=x.device, dtype=x.dtype)
+
         out = []
         for fc in self.all_fc:
             out.append(fc(x))
+
         if self.n_attributes > 0 and not self.bottleneck and self.cy_fc is not None:
             attr_preds = torch.cat(out[1:], dim=1)
             out[0] += self.cy_fc(attr_preds)
