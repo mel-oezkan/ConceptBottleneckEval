@@ -38,6 +38,9 @@ from CUB.models import (
     ModelXtoCtoY,
 )
 
+from torch.utils.tensorboard import SummaryWriter
+
+
 
 def run_epoch_simple(
     model, optimizer, loader, loss_meter, acc_meter, criterion, args, is_training
@@ -237,6 +240,8 @@ def train(model, args):
     logger.write(str(imbalance) + "\n")
     logger.flush()
 
+    tb_writer = SummaryWriter(log_dir=os.path.join(args.log_dir, 'tensorboard'))
+
     model = model.cuda()
     criterion = torch.nn.CrossEntropyLoss()
     # if args.use_attr and not args.no_img:
@@ -358,6 +363,9 @@ def train(model, args):
                 is_training=True,
             )
 
+        tb_writer.add_scalar('Loss/train', train_loss_meter, epoch)
+        tb_writer.add_scalar('Accuracy/train', train_acc_meter, epoch)
+
         if not args.ckpt:  # evaluate on val set
             val_loss_meter = AverageMeter()
             val_acc_meter = AverageMeter()
@@ -387,6 +395,10 @@ def train(model, args):
                         args,
                         is_training=False,
                     )
+
+
+            tb_writer.add_scalar('Loss/val', val_loss_meter, epoch)
+            tb_writer.add_scalar('Accuracy/val', val_acc_meter, epoch)
 
         else:  # retraining
             val_loss_meter = train_loss_meter
