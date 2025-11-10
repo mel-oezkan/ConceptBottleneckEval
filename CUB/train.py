@@ -74,16 +74,16 @@ def run_epoch_simple(
 
 
 def run_epoch(
-    model,
-    optimizer,
-    loader,
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    loader: torch.utils.data.DataLoader,
     loss_meter,
     acc_meter,
     criterion,
     attr_criterion,
     protomod_criterion: ProtoModLoss,
-    args,
-    is_training,
+    args: argparse.Namespace,
+    is_training: bool,
 ):
     """
     For the rest of the networks (X -> A, cotraining, simple finetune)
