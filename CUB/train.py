@@ -366,43 +366,39 @@ def train(model, args):
         tb_writer.add_scalar('Loss/train', train_loss_meter, epoch)
         tb_writer.add_scalar('Accuracy/train', train_acc_meter, epoch)
 
-        if not args.ckpt:  # evaluate on val set
-            val_loss_meter = AverageMeter()
-            val_acc_meter = AverageMeter()
+        val_loss_meter = AverageMeter()
+        val_acc_meter = AverageMeter()
 
-            with torch.no_grad():
-                if args.no_img:
-                    val_loss_meter, val_acc_meter = run_epoch_simple(
-                        model,
-                        optimizer,
-                        val_loader,
-                        val_loss_meter,
-                        val_acc_meter,
-                        criterion,
-                        args,
-                        is_training=False,
-                    )
-                else:
-                    val_loss_meter, val_acc_meter = run_epoch(
-                        model,
-                        optimizer,
-                        val_loader,
-                        val_loss_meter,
-                        val_acc_meter,
-                        criterion,
-                        attr_criterion,
-                        protomod_criterion,
-                        args,
-                        is_training=False,
-                    )
+        with torch.no_grad():
+            if args.no_img:
+                val_loss_meter, val_acc_meter = run_epoch_simple(
+                    model,
+                    optimizer,
+                    val_loader,
+                    val_loss_meter,
+                    val_acc_meter,
+                    criterion,
+                    args,
+                    is_training=False,
+                )
+            else:
+                val_loss_meter, val_acc_meter = run_epoch(
+                    model,
+                    optimizer,
+                    val_loader,
+                    val_loss_meter,
+                    val_acc_meter,
+                    criterion,
+                    attr_criterion,
+                    protomod_criterion,
+                    args,
+                    is_training=False,
+                )
 
 
-            tb_writer.add_scalar('Loss/val', val_loss_meter, epoch)
-            tb_writer.add_scalar('Accuracy/val', val_acc_meter, epoch)
+        tb_writer.add_scalar('Loss/val', val_loss_meter, epoch)
+        tb_writer.add_scalar('Accuracy/val', val_acc_meter, epoch)
 
-        else:  # retraining
-            val_loss_meter = train_loss_meter
-            val_acc_meter = train_acc_meter
 
         if best_val_acc < val_acc_meter.avg:
             best_val_epoch = epoch
