@@ -61,11 +61,11 @@ def extract_data(data_dir):
                       'uncertain_attribute_label': attribute_uncertain_labels_all[img_id]}
             if is_train_test[img_id]:
                 train_val_data.append(metadata)
-                if val_files is not None:
-                    if img_path in val_files:
-                        val_data.append(metadata)
-                    else:
-                        train_data.append(metadata)
+                # if val_files is not None:
+                #     if img_path in val_files:
+                #         val_data.append(metadata)
+                #     else:
+                #         train_data.append(metadata)
             else:
                 test_data.append(metadata)
 
