@@ -8,6 +8,7 @@ import sys
 import argparse
 from typing import Dict
 import time
+from datetime import datetime
 
 from APN.apn_loss import ProtoModLoss
 from CUB.template_model import End2EndModel
@@ -39,7 +40,6 @@ from CUB.models import (
 )
 
 from torch.utils.tensorboard import SummaryWriter
-
 
 
 def run_epoch_simple(
@@ -96,28 +96,27 @@ def run_epoch(
     else:
         model.eval()
 
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
     for _, data in enumerate(loader):
+        #! wann ist das überhaupt ein Fall?
         if attr_criterion is None and protomod_criterion is None:
             inputs, labels = data
             attr_labels, attr_labels_var = None, None
         else:
             inputs, labels, attr_labels = data
             if args.n_attributes > 1:
-                attr_labels = [i.long() for i in attr_labels]
-                attr_labels = torch.stack(attr_labels).t()  # .float() #N x 312
+                # attributes
+                attr_labels = torch.stack(attr_labels, dim=1).float()
+                print(attr_labels.shape)
             else:
                 if isinstance(attr_labels, list):
                     attr_labels = attr_labels[0]
-                attr_labels = attr_labels.unsqueeze(1)
-            attr_labels_var = torch.autograd.Variable(attr_labels).float()
-            attr_labels_var = (
-                attr_labels_var.cuda() if torch.cuda.is_available() else attr_labels_var
-            )
+                attr_labels = attr_labels.unsqueeze(1).float()
+            attr_labels_var = attr_labels.to(device)
 
-        inputs_var = torch.autograd.Variable(inputs)
-        inputs_var = inputs_var.cuda() if torch.cuda.is_available() else inputs_var
-        labels_var = torch.autograd.Variable(labels)
-        labels_var = labels_var.cuda() if torch.cuda.is_available() else labels_var
+        inputs_var = inputs.to(device)
+        labels_var = labels.to(device)
 
         if is_training and args.use_aux:
             outputs, similarity_scores, attention_maps, aux_outputs = model(inputs_var)
@@ -140,16 +139,12 @@ def run_epoch(
                         * (
                             1.0
                             * attr_criterion[i](
-                                outputs[i + out_start]
-                                .squeeze()
-                                .type(torch.cuda.FloatTensor),
+                                outputs[i + out_start].squeeze(),
                                 attr_labels_var[:, i],
                             )
                             + 0.4
                             * attr_criterion[i](
-                                aux_outputs[i + out_start]
-                                .squeeze()
-                                .type(torch.cuda.FloatTensor),
+                                aux_outputs[i + out_start].squeeze(),
                                 attr_labels_var[:, i],
                             )
                         )
@@ -220,6 +215,8 @@ def run_epoch(
 
 
 def train(model, args):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
     # Determine imbalance
     imbalance = None
     if args.use_attr and not args.no_img and args.weighted_loss:
@@ -240,9 +237,9 @@ def train(model, args):
     logger.write(str(imbalance) + "\n")
     logger.flush()
 
-    tb_writer = SummaryWriter(log_dir=os.path.join(args.log_dir, 'tensorboard'))
+    tb_writer = SummaryWriter(log_dir=os.path.join(args.log_dir, "tensorboard"))
 
-    model = model.cuda()
+    model = model.to(device)
     criterion = torch.nn.CrossEntropyLoss()
     # if args.use_attr and not args.no_img:
     #     attr_criterion = [] #separate criterion (loss function) for each attribute
@@ -363,8 +360,8 @@ def train(model, args):
                 is_training=True,
             )
 
-        tb_writer.add_scalar('Loss/train', train_loss_meter, epoch)
-        tb_writer.add_scalar('Accuracy/train', train_acc_meter, epoch)
+        tb_writer.add_scalar("Loss/train", train_loss_meter, epoch)
+        tb_writer.add_scalar("Accuracy/train", train_acc_meter, epoch)
 
         val_loss_meter = AverageMeter()
         val_acc_meter = AverageMeter()
@@ -395,10 +392,8 @@ def train(model, args):
                     is_training=False,
                 )
 
-
-        tb_writer.add_scalar('Loss/val', val_loss_meter, epoch)
-        tb_writer.add_scalar('Accuracy/val', val_acc_meter, epoch)
-
+        tb_writer.add_scalar("Loss/val", val_loss_meter, epoch)
+        tb_writer.add_scalar("Accuracy/val", val_acc_meter, epoch)
 
         if best_val_acc < val_acc_meter.avg:
             best_val_epoch = epoch
@@ -407,28 +402,24 @@ def train(model, args):
             torch.save(
                 model, os.path.join(args.log_dir, "best_model_%d.pth" % args.seed)
             )
-            # if best_val_acc >= 100: #in the case of retraining, stop when the model reaches 100% accuracy on both train + val sets
-            #    break
 
         train_loss_avg = train_loss_meter.avg
         val_loss_avg = val_loss_meter.avg
 
         time_duration = time.time() - start_time
         logger.write(
-            "Epoch [%d]:\tTrain loss: %.4f\tTrain accuracy: %.4f\t"
-            "Val loss: %.4f\tVal acc: %.4f\t"
-            "Best val epoch: %d\n"
-            "Time: %.2f sec\n"
-            % (
-                epoch,
-                train_loss_avg,
-                train_acc_meter.avg,
-                val_loss_avg,
-                val_acc_meter.avg,
-                best_val_epoch,
-                time_duration,
-            )
+            " - ".join([
+                datetime.now().strftime("%H:%M:%S"),
+                f"Epoch [{epoch}]",
+                f"Train/loss: {train_loss_avg:.4f}",
+                f"Train/acc: {train_acc_meter.avg:.4f}",
+                f"Val/loss: {val_loss_avg:.4f}",
+                f"Val/acc: {val_acc_meter.avg:.4f}"
+                f"Best val epoch: {best_val_epoch}",
+                f"Time: {time_duration:.2f} sec"
+            ])
         )
+
         logger.flush()
 
         if epoch <= stop_epoch:
