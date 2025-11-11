@@ -52,16 +52,16 @@ def run_epoch_simple(
         model.train()
     else:
         model.eval()
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     for _, data in enumerate(loader):
         inputs, labels = data
         if isinstance(inputs, list):
             # inputs = [i.long() for i in inputs]
             inputs = torch.stack(inputs).t().float()
         inputs = torch.flatten(inputs, start_dim=1).float()
-        inputs_var = torch.autograd.Variable(inputs).cuda()
-        inputs_var = inputs_var.cuda() if torch.cuda.is_available() else inputs_var
-        labels_var = torch.autograd.Variable(labels).cuda()
-        labels_var = labels_var.cuda() if torch.cuda.is_available() else labels_var
+        inputs_var = inputs.to(device)
+        labels_var = labels.to(device)
 
         outputs = model(inputs_var)
         loss = criterion(outputs, labels_var)
@@ -699,6 +699,11 @@ def parse_arguments(experiment):
             "-connect_CY",
             action="store_true",
             help="Whether to use concepts as auxiliary features (in multitasking) to predict Y",
+        )
+        parser.add_argument(
+            "--device",
+            default="cuda",
+            help="Determines the device the model is supposed to run on.",
         )
         args = parser.parse_args()
         args.three_class = args.n_class_attr == 3
