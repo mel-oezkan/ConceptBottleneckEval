@@ -12,36 +12,41 @@ from os.path import isfile, isdir, join
 from collections import defaultdict as ddict
 
 
-def extract_data(data_dir):
+def extract_data(data_dir) -> list[list[dict], list[dict], list[dict]]:
+    """Funtion to read the data and stor train, val, test splits.
+
+    Args:
+        data_dir (str): path to the CUB_200_2011 directory
+
+    Returns:
+        list[list[dict], ...]: list containing data of train, val and test
+    """
+    # init data path and determine val ratio
     cwd = os.getcwd()
     data_path = join(cwd, data_dir + "/images")
     val_ratio = 0.2
 
-    path_to_id_map = dict()  # map from full image path to image id
+    # map the file-paths to the id from images.txt
+    path_to_id_map = dict()  
     with open(data_path.replace("images", "images.txt"), "r") as f:
         for line in f:
             items = line.strip().split()
             path_to_id_map[join(data_path, items[1])] = int(items[0])
 
-    attribute_labels_all = ddict(
-        list
-    )  # map from image id to a list of attribute labels
-    attribute_certainties_all = ddict(
-        list
-    )  # map from image id to a list of attribute certainties
-    attribute_uncertain_labels_all = ddict(
-        list
-    )  # map from image id to a list of attribute labels calibrated for uncertainty
+    # create the attribute label and certainty maps
+    attribute_labels_all = ddict(list)  
+    attribute_certainties_all = ddict(list)
+    attribute_uncertain_labels_all = ddict(list)  
+    # map from image id to a list of attribute labels calibrated for uncertainty
+    
     # 1 = not visible, 2 = guessing, 3 = probably, 4 = definitely
     uncertainty_map = {
-        1: {
-            1: 0,
-            2: 0.5,
-            3: 0.75,
-            4: 1,
-        },  # calibrate main label based on uncertainty label
+        # calibrate main label based on uncertainty label
+        1: {1: 0, 2: 0.5, 3: 0.75, 4: 1},
         0: {1: 0, 2: 0.5, 3: 0.25, 4: 0},
     }
+
+    # load the images
     with open(join(cwd, data_dir + "/attributes/image_attribute_labels.txt"), "r") as f:
         for line in f:
             file_idx, attribute_idx, attribute_label, attribute_certainty = (
@@ -54,16 +59,17 @@ def extract_data(data_dir):
             attribute_uncertain_labels_all[int(file_idx)].append(uncertain_label)
             attribute_certainties_all[int(file_idx)].append(attribute_certainty)
 
-    is_train_test = dict()  # map from image id to 0 / 1 (1 = train)
+    # map from image id to 0 / 1 (1 = train)
+    is_train_test = dict()  
     with open(join(cwd, data_dir + "/train_test_split.txt"), "r") as f:
         for line in f:
             idx, is_train = line.strip().split()
             is_train_test[int(idx)] = int(is_train)
-    print(
-        "Number of train images from official train test split:",
-        sum(list(is_train_test.values())),
-    )
 
+    n_train = sum(list(is_train_test.values()))
+    print("Number of train images from official train test split:", n_train)
+
+    # create the datasets lists
     train_val_data, test_data = [], []
     train_data, val_data = [], []
     folder_list = [f for f in listdir(data_path) if isdir(join(data_path, f))]
@@ -89,7 +95,6 @@ def extract_data(data_dir):
                 "uncertain_attribute_label": attribute_uncertain_labels_all[img_id],
             }
 
-            #! addition
             if is_train_test[img_id]:
                 train_val_data.append(metadata)
             else:
@@ -99,8 +104,9 @@ def extract_data(data_dir):
     split = int(val_ratio * len(train_val_data))
     train_data = train_val_data[split:]
     val_data = train_val_data[:split]
-    
+
     print("Size of train set:", len(train_data))
+    print("Size of val set:", len(val_data))
     return train_data, val_data, test_data
 
 
