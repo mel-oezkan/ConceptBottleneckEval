@@ -82,7 +82,7 @@ class CUBDataset(Dataset):
             else:
                 return img, class_label, attr_label
         else:
-            return img, class_label
+            return img, class_label, img_path
 
 
 class ImbalancedDatasetSampler(torch.utils.data.sampler.Sampler):
