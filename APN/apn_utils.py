@@ -20,4 +20,5 @@ def get_middle_graph(kernel_size):
 
 
 def add_glasso(var, group):
-    return var[group, :].pow(2).sum(dim=0).add(1e-8).sum().pow(1 / 2.0)
+    # Assumes var is [num_attributes, num_vectors, channel_dim]
+    return var[group].pow(2).sum(dim=[0,1]).add(1e-8).sum().pow(1 / 2.0)

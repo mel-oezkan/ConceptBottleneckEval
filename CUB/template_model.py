@@ -127,6 +127,7 @@ class Inception3(nn.Module):
         expand_dim=0,
         three_class=False,
         connect_CY=False,
+        num_vectors=1,
     ):
         """
         Args:
@@ -172,7 +173,7 @@ class Inception3(nn.Module):
         self.Mixed_7b = InceptionE(1280)
         self.Mixed_7c = InceptionE(final_channels)
 
-        self.protomod = ProtoMod(channel_dim=final_channels, kernel_size=8)
+        self.protomod = ProtoMod(channel_dim=final_channels, kernel_size=8, num_vectors=num_vectors)
 
         if connect_CY:
             self.cy_fc = FC(n_attributes, num_classes, expand_dim)

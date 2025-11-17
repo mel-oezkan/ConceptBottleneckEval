@@ -483,6 +483,7 @@ def train_X_to_C_to_y(args):
         expand_dim=args.expand_dim,
         use_relu=args.use_relu,
         use_sigmoid=args.use_sigmoid,
+        num_vectors=args.n_proto_vectors,
     )
     train(model, args)
 
@@ -695,6 +696,12 @@ def parse_arguments(experiment):
             "--device",
             default="cuda",
             help="Determines the device the model is supposed to run on.",
+        )
+        parser.add_argument(
+            "-n_proto_vectors",
+            type=int,
+            default=1,
+            help="Number of prototype vectors per attribute in ProtoMod.",
         )
         args = parser.parse_args()
         args.three_class = args.n_class_attr == 3

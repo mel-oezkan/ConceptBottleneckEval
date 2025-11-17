@@ -57,7 +57,8 @@ class ProtoModLoss(nn.Module):
         )
         loss += cpt_loss
 
-        prototypes = self.protomod.prototype_vectors.squeeze()
+        num_vectors = self.protomod.prototype_vectors.shape[0] // num_attributes
+        prototypes = self.protomod.prototype_vectors.squeeze().reshape(num_attributes, num_vectors, -1) # [num_attributes, num_vectors, channel_dim]
         if self.use_groups:
             # L_AD in the APN paper: Attribute decorrelation loss
             decorrelation_loss = zeros_like(cpt_loss)

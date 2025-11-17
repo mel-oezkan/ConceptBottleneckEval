@@ -50,6 +50,7 @@ def ModelXtoCtoY(
     expand_dim,
     use_relu,
     use_sigmoid,
+    num_vectors # Number of prototype vectors per attribute
 ):
     model1 = inception_v3(
         pretrained=pretrained,
@@ -60,6 +61,7 @@ def ModelXtoCtoY(
         bottleneck=True,
         expand_dim=expand_dim,
         three_class=(n_class_attr == 3),
+        num_vectors=num_vectors,
     )
     if n_class_attr == 3:
         model2 = MLP(

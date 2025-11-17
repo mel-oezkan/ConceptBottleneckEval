@@ -14,7 +14,7 @@ OR) You can get `CUB_processed` from Step 1. above with the following steps
 ### a. Task and concept tables (Table 1 and 2)
 ##### 0. APN Integration
 ```
-python experiments.py cub Joint --seed 1 -ckpt 1 -log_dir outputs/ -e 1000 -optimizer sgd -pretrained -use_aux -use_attr -weighted_loss multiple -data_dir data/CUB_processed/class_attr_data_10 -n_attributes 312 -attr_loss_weight 1 -normalize_loss -b 64 -weight_decay 0.00004 -lr 0.01 -scheduler_step 1000 -end2end
+python experiments.py cub Joint --seed 1 -ckpt 1 -log_dir outputs/ -e 1000 -optimizer sgd -pretrained -use_aux -use_attr -weighted_loss multiple -data_dir data/CUB_processed/class_attr_data_10 -n_attributes 312 -attr_loss_weight 1 -normalize_loss -b 64 -weight_decay 0.00004 -lr 0.01 -scheduler_step 1000 -end2end -n_proto_vectors 5
 ```
 
 ##### 1. Independent
