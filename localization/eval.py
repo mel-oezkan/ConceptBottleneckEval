@@ -4,6 +4,145 @@ import torch
 
 from utils import *
 from statistics import mean
+import os
+from CUB.dataset import CUBDataset
+
+from utils import get_KP_BB
+
+
+#rewrite of method because this sucks
+def test_CUB_IoU(args:dict, model, dataset:CUBDataset, CUB_root:str):
+    #reimplementation of paper description
+    
+    #save ious from images
+    whole_IoU = []
+
+    #get relevant paths to mappings
+    imgID_imgName_mapping_path, parts_locs_path, parts_mapping_path, bird_BB_path = get_CUB_paths(CUB_root)
+
+    #read here later into dictionary
+    imgName_to_imgID = {}
+    with open(imgID_imgName_mapping_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            id_str, *text_parts = line.split()
+            key = " ".join(text_parts)
+            imgName_to_imgID[key] = int(id_str)
+
+    img_id_to_part_locs = {}
+    with open(parts_locs_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            id_str, *info = line.split()
+            
+            info = [int(x) for x in info]
+
+            if int(id_str) not in img_id_to_part_locs:
+                img_id_to_part_locs[int(id_str)] = [info]
+            else:
+                img_id_to_part_locs[int(id_str)] = img_id_to_part_locs[int(id_str)] + [info]
+
+    imgID_to_birdBB = {}
+    with open(bird_BB_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            id_str, *bb_info = line.split()
+
+            bb_info = [int(x) for x in bb_info]
+            
+            imgID_to_birdBB[int(id_str)] = bb_info
+
+
+
+    with torch.no_grad():
+        for i, (input, target, impath) in enumerate(dataset):
+            #for each image, first find relevant data
+
+            #get image id
+            img_name = os.sep.join(impath.split(os.sep)[-2:]) #class path is also in mapping name
+            img_id = imgName_to_imgID[img_name]
+            #get location and visibility infos of parts of image
+            part_infos = img_id_to_part_locs[img_id]
+            #get bird bb of image
+            bird_bb = imgID_to_birdBB[img_id] #fun fact readme says it is x, y, width, height, but APN later wants x1, y1, x2, y2
+
+            bounding_boxes_per_part = get_BB_per_part(bird_bb, part_infos)
+
+            if args.cuda:
+                input = input.cuda()
+            
+            output, pre_attri, attention, _ = model(input)
+
+
+            #get argmax attribute per part
+            argmax_per_part = None #max index per part, -1 if part not present
+            #take attention if given else empty
+            heatmaps = [attention[idx] if idx != -1 else [] for idx in argmax_per_part ]
+
+            IoU = calc_attention_IoU(bounding_boxes_per_part, heatmaps)
+
+
+            #then get attention map per part
+            #now we have pairings of attention map and gt points
+            #in called function prep 
+
+            #create mask per part and calc localization accuracy
+            batch_IoU = calculate_atten_IoU(input, impath, save_att_idx, maps, [layer_name], target_groups, KP_root,
+                                            save_att=save_att, scale=scale, resize_WH=opt.resize_WH,
+                                            KNOW_BIRD_BB=opt.KNOW_BIRD_BB)
+
+            whole_IoU += batch_IoU
+
+    body_avg_IoU, mean_IoU = calculate_average_IoU(whole_IoU, IoU_thr=args.IoU_thr)
+    return body_avg_IoU, mean_IoU
+
+
+def get_BB_per_part(bird_bb, part_infos, scale=4):
+    #generate a bounding box mask per part, empty if part is not visible
+    #BB format returned is (x1, y1, x2, y2)
+
+    width = bird_bb[2]
+    height = bird_bb[3]
+
+    mask_w = width / scale
+    mask_h = height / scale
+
+    part_masks = []
+    for info in part_infos:
+        #info: part_id, x1, y1, visible
+        if info[-1] == 0: #part not visible, no gt
+            part_masks.append([])
+            continue
+        gt = (info[1], info[2])
+        #change from x, y, w, h to x1, y1, x2, y2
+        transformed_bird_BB = [bird_bb[0], bird_bb[1], bird_bb[0] + bird_bb[2], bird_bb[1] + bird_bb[3]]
+        part_masks.append(get_KP_BB(gt, mask_h, mask_w, transformed_bird_BB))
+
+    return part_masks
+
+
+def get_CUB_paths(CUB_root:str):
+    #get path to certain files starting from CUB root, assuming CUB structure
+
+    #maps image id to image name
+    imgID_imgName_mapping_path = os.path.join(CUB_root, "images.txt")
+    #information about parts bounding boxes and in-image occurence
+    parts_locs_path = os.path.join(CUB_root, "parts", "parts_loc.txt") 
+    #maps part ID to part name
+    parts_mapping_path = os.path.join(CUB_root, "parts", "parts.txt")
+    #information about bird bounding boxes per image id
+    bird_BB_path = os.path.join(CUB_root, "bounding_boxes.txt")
+
+    return imgID_imgName_mapping_path, parts_locs_path, parts_mapping_path, bird_BB_path
+
+
+
 
 
 def test_with_IoU(opt, model, testloader, vis_groups=None, vis_root=None,
@@ -51,8 +190,8 @@ def test_with_IoU(opt, model, testloader, vis_groups=None, vis_root=None,
                 target = target.cuda()
 
             output, pre_attri, attention, _ = model(input)#, attribute)
-            # pre_attri.shape : 64， 312
-            # attention.shape : 64, 312, 7, 7
+            # pre_attri.shape : 64，112
+            # attention.shape : 64, 112, 8, 8
             maps = {layer_name: attention['layer4'].cpu().numpy()}
             pre_attri = pre_attri['layer4']
             target_groups = [{} for _ in range(output.size(0))]  # calculate the target groups for each image
