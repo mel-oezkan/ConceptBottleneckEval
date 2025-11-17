@@ -9,3 +9,5 @@ outputs
 models
 CUB_200_2011/
 CUB/pretrained
+uv.lock
+pyproject.toml
