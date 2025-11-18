@@ -1,13 +1,14 @@
 #code from the APN github: https://github.com/wenjiaXu/APN-ZSL/blob/master/model/main_utils.py#L295
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 from utils import *
 from statistics import mean
 import os
 from CUB.dataset import CUBDataset
 
-from utils import get_KP_BB
+from utils import get_KP_BB, get_iou
 
 
 #rewrite of method because this sucks
@@ -63,7 +64,7 @@ def test_CUB_IoU(args:dict, model, dataset:CUBDataset, CUB_root:str):
     with torch.no_grad():
         for i, (input, target, impath) in enumerate(dataset):
             #for each image, first find relevant data
-
+            img_shape = input.shape
             #get image id
             img_name = os.sep.join(impath.split(os.sep)[-2:]) #class path is also in mapping name
             img_id = imgName_to_imgID[img_name]
@@ -83,25 +84,41 @@ def test_CUB_IoU(args:dict, model, dataset:CUBDataset, CUB_root:str):
             #get argmax attribute per part
             argmax_per_part = None #max index per part, -1 if part not present
             #take attention if given else empty
-            heatmaps = [attention[idx] if idx != -1 else [] for idx in argmax_per_part ]
+            heatmaps = [attention[idx] if idx != -1 else [] for idx in argmax_per_part]
 
-            IoU = calc_attention_IoU(bounding_boxes_per_part, heatmaps)
+            #upscale heatmaps, use cv2 like original code
+            heatmap = [cv2.resize(m, img_shape[-2:]) for m in heatmaps]
 
+            optimal_masks = [get_optimal_mask(heatmap, part_box) for heatmap, part_box in zip(heatmaps, bounding_boxes_per_part)]
 
-            #then get attention map per part
-            #now we have pairings of attention map and gt points
-            #in called function prep 
+            IoUs = [get_iou({"x1":op_mask[0], "y1":op_mask[1], "x2":op_mask[2], "y2":op_mask[3]}, {"x1":gt_mask[0], "y1":gt_mask[1], "x2":gt_mask[2], "y2":gt_mask[3]}) \
+                    if op_mask != [] else -1 for op_mask, gt_mask in zip(optimal_masks, bounding_boxes_per_part)]
 
-            #create mask per part and calc localization accuracy
-            batch_IoU = calculate_atten_IoU(input, impath, save_att_idx, maps, [layer_name], target_groups, KP_root,
-                                            save_att=save_att, scale=scale, resize_WH=opt.resize_WH,
-                                            KNOW_BIRD_BB=opt.KNOW_BIRD_BB)
-
-            whole_IoU += batch_IoU
+           
+            whole_IoU += IoUs
 
     body_avg_IoU, mean_IoU = calculate_average_IoU(whole_IoU, IoU_thr=args.IoU_thr)
     return body_avg_IoU, mean_IoU
 
+
+def get_optimal_mask(heatmap, part_bb):
+    #takes the heatmap and
+    if heatmap == [] or part_bb == []: #normally both should be empty but just in case make or
+        return []
+    
+    mask_w = part_bb[2] - part_bb[0]
+    mask_h = part_bb[3] - part_bb[1]
+
+    kernel = torch.ones((1, 1, mask_h, mask_w))
+    response = F.conv2d(heatmap, kernel)
+
+    max_pos = response.argmax()
+
+    best_y = (max_pos // response.shape[-1]).item()
+    best_x = (max_pos %  response.shape[-1]).item()
+
+    #x1, y1, x2, y2
+    return [best_x - int(mask_w/2), best_y - int(mask_h/2), best_x + int(mask_w/2), best_y + int(mask_h/2)]
 
 def get_BB_per_part(bird_bb, part_infos, scale=4):
     #generate a bounding box mask per part, empty if part is not visible
