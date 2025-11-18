@@ -116,6 +116,12 @@ class CUBDatasetPartSegmentations(Dataset):
         self.image_dir = image_dir
         self.part_seg_dir = part_seg_dir
 
+        self.mask_transform = transforms.Compose([
+            transforms.CenterCrop(299),         
+            transforms.ToTensor(),                          
+            lambda t: (t > 0.5).float()  # binarize
+        ])
+
     def __len__(self):
         return len(self.data)
 
@@ -126,9 +132,9 @@ class CUBDatasetPartSegmentations(Dataset):
 
         # If it exists: get part segmentation mask for this image / part pair
         mask = Image.open(path_to_mask).convert("L")  # 'L' = grayscale
-        mask = mask.resize((self.resol, self.resol), resample=Image.NEAREST)
-        mask_tensor = torch.from_numpy((np.array(mask) > 127).astype(np.float32)) # make binary and to tensor
-        return mask_tensor.unsqueeze(0) # add empty channel dimension to get (C, H, W)
+
+        # Apply transformations to it (center crop like image, then binarize and add dummy channel dim)
+        return self.mask_transform(mask)
     
     def __getitem__(self, idx):
         img_data = self.data[idx]
@@ -158,7 +164,7 @@ class CUBDatasetPartSegmentations(Dataset):
             # IMPORTANT: For left / right distinctions, we add the masks to one.
             part_list = [part]
             if part in ["eye", "wing", "leg"]:
-                part_list = [f"right_{part}", "left_{part}"]
+                part_list = [f"right_{part}", f"left_{part}"]
 
             tmp_masks = []
             for tmp_part in part_list:

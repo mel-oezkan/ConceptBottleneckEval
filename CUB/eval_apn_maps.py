@@ -18,7 +18,7 @@ from APN.apn_consts import PART_SEG_GROUPS
 from APN.index_translation_util import map_attribute_ids_to_part_seg_group_id, get_attribute_names
 
 
-def visualise(imgs, attention_masks, seg_masks, attribute_names, n_attributes=10, batch_idx=0):
+def visualise(imgs, attention_masks, seg_masks, attribute_names, n_attributes=10, batch_idx=7, save_path=""):
     """
         imgs: torch.Tensor of [B, C, H, W] the respective images
         attention_masks: torch.Tensor of [B, A, H, W] the attention masks, per attribute A
@@ -33,33 +33,37 @@ def visualise(imgs, attention_masks, seg_masks, attribute_names, n_attributes=10
     attr_names = attribute_names[:n_attributes]
 
     img_np = img.permute(1, 2, 0).cpu().numpy()  # H x W x C
-    fig, axes = plt.subplots(3, n_attributes, figsize=(3*n_attributes, 6))
+    fig, axes = plt.subplots(2, n_attributes, figsize=(2*n_attributes, 5))
 
     # TODO: DENORM IMAGE
 
     for col in range(n_attributes):
 
         # Attribute name
-        axes[0, col].text(0.5, 0.5, attr_names[col], ha='center', va='center', fontsize=10)
-        axes[0, col].axis('off')
+        # axes[0, col].text(0.5, 0.5, attr_names[col], ha='center', va='center', fontsize=10)
+        # axes[0, col].axis('off')
+        # Title above attention image (row index 1)
+        axes[0, col].set_title(attr_names[col], fontsize=10, pad=4)
 
         # Attention mask overlay
         attn_mask = masks[col].cpu().detach().numpy()
-        axes[1, col].imshow(img_np)
-        axes[1, col].imshow(attn_mask, cmap='jet', alpha=0.5)
-        axes[1, col].axis('off')
+        axes[0, col].imshow(img_np)
+        axes[0, col].imshow(attn_mask, cmap='jet', alpha=0.5)
+        axes[0, col].axis('off')
 
         # Segmentation mask overlay
         seg_mask = seg_masks[col].cpu().detach().numpy()
-        axes[2, col].imshow(img_np)
-        axes[2, col].imshow(seg_mask, cmap='spring', alpha=0.5)
-        axes[2, col].axis('off')
+        axes[1, col].imshow(img_np)
+        axes[1, col].imshow(seg_mask, cmap='spring', alpha=0.5)
+        axes[1, col].axis('off')
 
-    axes[1, 0].set_ylabel("ProtoNet Map")
-    axes[2, 0].set_ylabel("Part Segmentation")
+    axes[0, 0].set_ylabel("ProtoNet Map")
+    axes[1, 0].set_ylabel("Part Segmentation")
+    # fig.text(0.01, 0.66, "ProtoNet Map", va='center', rotation='vertical', fontsize=12)
+    # fig.text(0.01, 0.36, "Part Segmentation", va='center', rotation='vertical', fontsize=12)
 
     plt.tight_layout()
-    plt.savefig("attribute_part_seg_vis.png", dpi=150, bbox_inches='tight')
+    plt.savefig(os.path.join(save_path, "attribute_part_seg_vis_b7.png"), dpi=200, bbox_inches='tight')
 
 
 def eval(args):
@@ -139,7 +143,7 @@ def eval(args):
         attention_maps_upsampled = F.interpolate(attention_maps, size=(H, W), mode='bilinear', align_corners=False)
 
         # Visualise
-        visualise(inputs, attention_maps_upsampled, seg_masks_per_attribute, attribute_names)
+        visualise(inputs, attention_maps_upsampled, seg_masks_per_attribute, attribute_names, save_path=args.log_dir)
 
         assert 0 == 1
 

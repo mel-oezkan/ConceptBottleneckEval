@@ -18,7 +18,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import math
 import torch
 import numpy as np
-from analysis import Logger, AverageMeter, accuracy, binary_accuracy
+from analysis import Logger, AverageMeter, accuracy, binary_accuracy, LossMeter
 
 from CUB import probe, tti, gen_cub_synthetic, hyperopt
 from CUB.dataset import load_data, find_class_imbalance
@@ -108,7 +108,7 @@ def run_epoch(
             if args.n_attributes > 1:
                 # attributes
                 attr_labels = torch.stack(attr_labels, dim=1).float()
-                print(attr_labels.shape)
+                # print(attr_labels.shape)
             else:
                 if isinstance(attr_labels, list):
                     attr_labels = attr_labels[0]
@@ -121,6 +121,7 @@ def run_epoch(
         if is_training and args.use_aux:
             outputs, similarity_scores, attention_maps, aux_outputs = model(inputs_var)
             losses = []
+            log_losses = []
             out_start = 0
             if (
                 not args.bottleneck
@@ -129,6 +130,7 @@ def run_epoch(
                     aux_outputs[0], labels_var
                 )
                 losses.append(loss_main)
+                log_losses.append(loss_main.item())
                 out_start = 1
             if (
                 attr_criterion is not None and args.attr_loss_weight > 0
@@ -150,10 +152,13 @@ def run_epoch(
                         )
                     )
 
-            loss, _, _, _ = protomod_criterion(
+            loss, attribute_reg_loss, cpt_loss, decorrelation_loss = protomod_criterion(
                 similarity_scores, attention_maps, attr_labels_var
             )
             losses.append(loss)
+            log_losses.append(attribute_reg_loss)
+            log_losses.append(cpt_loss)
+            log_losses.append(decorrelation_loss)
         else:  # testing or no aux logits
             (
                 outputs,
@@ -161,10 +166,12 @@ def run_epoch(
                 attention_maps,
             ) = model(inputs_var)
             losses = []
+            log_losses = []
             out_start = 0
             if not args.bottleneck:
                 loss_main = criterion(outputs[0], labels_var)
                 losses.append(loss_main)
+                log_losses.append(loss_main.item())
                 out_start = 1
             if (
                 attr_criterion is not None and args.attr_loss_weight > 0
@@ -180,10 +187,13 @@ def run_epoch(
                         )
                     )
 
-            loss, _, _, _ = protomod_criterion(
+            loss, attribute_reg_loss, cpt_loss, decorrelation_loss = protomod_criterion(
                 similarity_scores, attention_maps, attr_labels_var
             )
             losses.append(loss)
+            log_losses.append(attribute_reg_loss)
+            log_losses.append(cpt_loss)
+            log_losses.append(decorrelation_loss)
 
         if args.bottleneck:  # attribute accuracy
             sigmoid_outputs = torch.nn.Sigmoid()(torch.cat(outputs, dim=1))
@@ -206,7 +216,9 @@ def run_epoch(
                     )
         else:  # finetune
             total_loss = sum(losses)
-        loss_meter.update(total_loss.item(), inputs.size(0))
+        loss_meter.update(np.array([
+            total_loss.item(), log_losses[0], log_losses[1], log_losses[2], log_losses[3]
+        ]), inputs.size(0))
         if is_training:
             optimizer.zero_grad()
             total_loss.backward()
@@ -256,11 +268,14 @@ def train(model, args):
     # Weights from the APN paper
     reg_weights = {
         "attribute_reg": 1.0,
-        "cpt": 1e-9,
-        "decorrelation": 4e-2,
+        "cpt": 1e-7,
+        "decorrelation": 5e-2,
     }
     use_groups = True
     protomod_criterion = ProtoModLoss(model.protomod, reg_weights, use_groups)
+
+    # For nice logging of individual losses
+    loss_labels = ["total_loss", "classification_loss", "attribute_reg_loss", "cpt_loss", "decorrelation_loss"]
 
     if args.optimizer == "Adam":
         optimizer = torch.optim.Adam(
@@ -333,7 +348,7 @@ def train(model, args):
 
     for epoch in range(0, args.epochs):
         start_time = time.time()
-        train_loss_meter = AverageMeter()
+        train_loss_meter = LossMeter(loss_labels)
         train_acc_meter = AverageMeter()
         if args.no_img:
             train_loss_meter, train_acc_meter = run_epoch_simple(
@@ -360,10 +375,11 @@ def train(model, args):
                 is_training=True,
             )
 
-        tb_writer.add_scalar("Loss/train", train_loss_meter, epoch)
-        tb_writer.add_scalar("Accuracy/train", train_acc_meter, epoch)
+        for i in range(train_loss_meter.n_losses):
+            tb_writer.add_scalar(f"Train/{loss_labels[i]}", train_loss_meter.avg[i], epoch)
+        tb_writer.add_scalar("Train/Accuracy", train_acc_meter.avg, epoch)
 
-        val_loss_meter = AverageMeter()
+        val_loss_meter = LossMeter(loss_labels)
         val_acc_meter = AverageMeter()
 
         with torch.no_grad():
@@ -392,8 +408,9 @@ def train(model, args):
                     is_training=False,
                 )
 
-        tb_writer.add_scalar("Loss/val", val_loss_meter, epoch)
-        tb_writer.add_scalar("Accuracy/val", val_acc_meter, epoch)
+        for i in range(val_loss_meter.n_losses):
+            tb_writer.add_scalar(f"Val/{loss_labels[i]}", val_loss_meter.avg[i], epoch)
+        tb_writer.add_scalar("Val/Accuracy", val_acc_meter.avg, epoch)
 
         if best_val_acc < val_acc_meter.avg:
             best_val_epoch = epoch
@@ -411,12 +428,19 @@ def train(model, args):
             " - ".join([
                 datetime.now().strftime("%H:%M:%S"),
                 f"Epoch [{epoch}]",
-                f"Train/loss: {train_loss_avg:.4f}",
-                f"Train/acc: {train_acc_meter.avg:.4f}",
-                f"Val/loss: {val_loss_avg:.4f}",
-                f"Val/acc: {val_acc_meter.avg:.4f}"
+                *[
+                    f"Train/{loss_labels[i]}: {train_loss_meter.avg[i]:.4f}"
+                    for i in range(train_loss_meter.n_losses)
+                ],
+                f"Train/acc: {train_acc_meter.avg.item():.4f}",
+                *[
+                    f"Val/{loss_labels[i]}: {val_loss_meter.avg[i]:.4f}"
+                    for i in range(val_loss_meter.n_losses)
+                ],
+                f"Val/acc: {val_acc_meter.avg.item():.4f}",
                 f"Best val epoch: {best_val_epoch}",
-                f"Time: {time_duration:.2f} sec"
+                f"Time: {time_duration:.2f} sec",
+                "\n"
             ])
         )
 
