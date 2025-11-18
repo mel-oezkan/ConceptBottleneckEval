@@ -27,4 +27,9 @@ class ProtoMod(nn.Module):
             attention_map, kernel_size=self.kernel_size
         ).view(batch_size, -1)
 
-        return similarity_score, attention_map
+        similarity_score = similarity_score.reshape(
+            batch_size, NUM_ATTRIBUTES, -1) # [batch_size, num_attributes, num_vectors]
+        
+        max_similarity_score = similarity_score.max(dim=2)[0]  # [batch_size, num_attributes]
+
+        return max_similarity_score, attention_map
