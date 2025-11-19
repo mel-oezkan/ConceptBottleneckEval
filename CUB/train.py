@@ -15,6 +15,7 @@ import time
 from datetime import datetime
 
 from APN.apn_loss import ProtoModLoss
+from APN.apn_consts import CUB_SELECTED_ATTRIBUTES
 
 from CUB import probe, tti, gen_cub_synthetic, hyperopt
 from CUB.dataset import load_data, find_class_imbalance
@@ -104,11 +105,12 @@ def run_epoch_proto(
             if args.n_attributes > 1:
                 # attributes
                 attr_labels = torch.stack(attr_labels, dim=1).float()
-                print(attr_labels.shape)
             else:
                 if isinstance(attr_labels, list):
                     attr_labels = attr_labels[0]
                 attr_labels = attr_labels.unsqueeze(1).float()
+                attr_labels = attr_labels[CUB_SELECTED_ATTRIBUTES]
+                
             attr_labels_var = attr_labels.to(device)
             
         inputs_var = inputs.to(device)
@@ -227,6 +229,8 @@ def run_epoch(
     """
     For the rest of the networks (X -> A, cotraining, simple finetune)
     """
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
     if is_training:
         model.train()
     else:
@@ -239,22 +243,19 @@ def run_epoch(
         else:
             inputs, labels, attr_labels = data
             if args.n_attributes > 1:
-                attr_labels = [i.long() for i in attr_labels]
-                attr_labels = torch.stack(attr_labels).t()  # .float() #N x 312
+                # attributes
+                attr_labels = torch.stack(attr_labels, dim=1).float()
+                print("attr_labels shape:", attr_labels.shape)
             else:
                 if isinstance(attr_labels, list):
                     attr_labels = attr_labels[0]
-                attr_labels = attr_labels.unsqueeze(1)
-            attr_labels_var = torch.autograd.Variable(attr_labels).float()
-            attr_labels_var = (
-                attr_labels_var.cuda() if torch.cuda.is_available() else attr_labels_var
-            )
-
-        inputs_var = torch.autograd.Variable(inputs)
-        inputs_var = inputs_var.cuda() if torch.cuda.is_available() else inputs_var
-        labels_var = torch.autograd.Variable(labels)
-        labels_var = labels_var.cuda() if torch.cuda.is_available() else labels_var
-
+                attr_labels = attr_labels.unsqueeze(1).float()
+                attr_labels = attr_labels[CUB_SELECTED_ATTRIBUTES]
+                
+            attr_labels_var = attr_labels.to(device)
+            
+        inputs_var = inputs.to(device)
+        labels_var = labels.to(device)
         if is_training and args.use_aux:
             outputs, aux_outputs = model(inputs_var)
             losses = []
@@ -277,15 +278,13 @@ def run_epoch(
                             1.0
                             * attr_criterion[i](
                                 outputs[i + out_start]
-                                .squeeze()
-                                .type(torch.cuda.FloatTensor),
+                                .squeeze(),
                                 attr_labels_var[:, i],
                             )
                             + 0.4
                             * attr_criterion[i](
                                 aux_outputs[i + out_start]
-                                .squeeze()
-                                .type(torch.cuda.FloatTensor),
+                                .squeeze(),
                                 attr_labels_var[:, i],
                             )
                         )
@@ -306,8 +305,7 @@ def run_epoch(
                         args.attr_loss_weight
                         * attr_criterion[i](
                             outputs[i + out_start]
-                            .squeeze()
-                            .type(torch.cuda.FloatTensor),
+                            .squeeze(),
                             attr_labels_var[:, i],
                         )
                     )
@@ -368,19 +366,21 @@ def train(model, args):
 
     model = model.to(device)
     criterion = torch.nn.CrossEntropyLoss()
-    if args.use_attr and not args.no_img:
-        attr_criterion = []  # separate criterion (loss function) for each attribute
-        if args.weighted_loss:
-            assert imbalance is not None
-            for ratio in imbalance:
-                attr_criterion.append(
-                    torch.nn.BCEWithLogitsLoss(weight=torch.FloatTensor([ratio]).cuda())
-                )
-        else:
-            for i in range(args.n_attributes):
-                attr_criterion.append(torch.nn.CrossEntropyLoss())
-    else:
-        attr_criterion = None
+   
+    attr_criterion = None
+    if not model.__class__.__name__ == "ProtoEnd2End":
+        #! only when not apn
+        if args.use_attr and not args.no_img:
+            attr_criterion = []  # separate criterion (loss function) for each attribute
+            if args.weighted_loss:
+                assert imbalance is not None
+                for ratio in imbalance:
+                    attr_criterion.append(
+                        torch.nn.BCEWithLogitsLoss(weight=torch.FloatTensor([ratio]).to(device))
+                    )
+            else:
+                for i in range(args.n_attributes):
+                    attr_criterion.append(torch.nn.CrossEntropyLoss())
 
     if args.optimizer == "Adam":
         optimizer = torch.optim.Adam(
@@ -510,8 +510,8 @@ def train(model, args):
 
 
 
-        tb_writer.add_scalar("Loss/train", train_loss_meter, epoch)
-        tb_writer.add_scalar("Accuracy/train", train_acc_meter, epoch)
+        tb_writer.add_scalar("Loss/train", train_loss_meter.avg, epoch)
+        tb_writer.add_scalar("Accuracy/train", train_acc_meter.avg, epoch)
 
         if not args.ckpt:  # evaluate on val set
             val_loss_meter = AverageMeter()
@@ -530,21 +530,47 @@ def train(model, args):
                         is_training=False,
                     )
                 else:
-                    val_loss_meter, val_acc_meter = run_epoch(
-                        model,
-                        optimizer,
-                        val_loader,
-                        val_loss_meter,
-                        val_acc_meter,
-                        criterion,
-                        attr_criterion,
-                        args,
-                        is_training=False,
-                    )
+                    if model.__class__.__name__ == "ProtoEnd2End":
+                        reg_weights = {
+                            "attribute_reg": 1.0,
+                            "cpt": 1e-9,
+                            "decorrelation": 4e-2,
+                        }
+                        use_groups = True
+                        protomod_criterion = ProtoModLoss(
+                            model.protomod, 
+                            reg_weights, 
+                            use_groups
+                        )
+
+                        train_loss_meter, train_acc_meter = run_epoch_proto(
+                            model,
+                            optimizer,
+                            train_loader,
+                            train_loss_meter,
+                            train_acc_meter,
+                            criterion,
+                            attr_criterion,
+                            protomod_criterion,
+                            args,
+                            is_training=False,
+                        )
+                    else:
+                        val_loss_meter, val_acc_meter = run_epoch(
+                            model,
+                            optimizer,
+                            val_loader,
+                            val_loss_meter,
+                            val_acc_meter,
+                            criterion,
+                            attr_criterion,
+                            args,
+                            is_training=False,
+                        )
 
             
-        tb_writer.add_scalar("Loss/val", val_loss_meter, epoch)
-        tb_writer.add_scalar("Accuracy/val", val_acc_meter, epoch)
+        tb_writer.add_scalar("Loss/val", val_loss_meter.avg, epoch)
+        tb_writer.add_scalar("Accuracy/val", val_acc_meter.avg, epoch)
 
 
         if best_val_acc < val_acc_meter.avg:

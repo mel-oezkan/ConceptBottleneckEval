@@ -290,9 +290,9 @@ def accuracy(output, target, topk=(1,)):
     batch_size = target.size(0)
     _, pred = output.topk(maxk, 1, True, True)
     pred = pred.t()
+
     temp = target.view(1, -1).expand_as(pred)
-    temp = temp.cuda()
-    correct = pred.eq(temp)
+    correct = pred.eq(temp.to(output.device))
 
     res = []
     for k in topk:
