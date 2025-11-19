@@ -14,6 +14,12 @@ import torch
 import numpy as np
 from analysis import Logger, AverageMeter, accuracy, binary_accuracy
 
+from typing import Dict
+import time
+from datetime import datetime
+
+from APN.apn_loss import ProtoModLoss
+
 from CUB import probe, tti, gen_cub_synthetic, hyperopt
 from CUB.dataset import load_data, find_class_imbalance
 from CUB.config import (
@@ -31,6 +37,7 @@ from CUB.models import (
     ModelXtoC,
     ModelOracleCtoY,
     ModelXtoCtoY,
+    ModelXtoPrototoY,
 )
 
 
@@ -68,16 +75,31 @@ def run_epoch_simple(
     return loss_meter, acc_meter
 
 
-def run_epoch(
-    model,
-    optimizer,
-    loader,
+def run_epoch_proto(
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    loader: torch.utils.data.DataLoader,
     loss_meter,
     acc_meter,
     criterion,
     attr_criterion,
-    args,
-    is_training,
+    protomod_criterion: ProtoModLoss,
+    args: argparse.Namespace,
+    is_training: bool,
+):
+    pass
+
+def run_epoch(
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    loader: torch.utils.data.DataLoader,
+    loss_meter,
+    acc_meter,
+    criterion,
+    attr_criterion,
+    protomod_criterion: ProtoModLoss,
+    args: argparse.Namespace,
+    is_training: bool,
 ):
     """
     For the rest of the networks (X -> A, cotraining, simple finetune)
@@ -197,6 +219,8 @@ def run_epoch(
 
 
 def train(model, args):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
     # Determine imbalance
     imbalance = None
     if args.use_attr and not args.no_img and args.weighted_loss:
@@ -217,7 +241,9 @@ def train(model, args):
     logger.write(str(imbalance) + "\n")
     logger.flush()
 
-    model = model.cuda()
+    tb_writer = SummaryWriter(log_dir=os.path.join(args.log_dir, "tensorboard"))
+
+    model = model.to(device)
     criterion = torch.nn.CrossEntropyLoss()
     if args.use_attr and not args.no_img:
         attr_criterion = []  # separate criterion (loss function) for each attribute
@@ -267,6 +293,7 @@ def train(model, args):
     logger.write("train data path: %s\n" % train_data_path)
 
     if args.ckpt:  # retraining
+        #! können wir eigentlich auch löschen
         train_loader = load_data(
             [train_data_path, val_data_path],
             args.use_attr,
@@ -329,6 +356,9 @@ def train(model, args):
                 is_training=True,
             )
 
+        tb_writer.add_scalar("Loss/train", train_loss_meter, epoch)
+        tb_writer.add_scalar("Accuracy/train", train_acc_meter, epoch)
+
         if not args.ckpt:  # evaluate on val set
             val_loss_meter = AverageMeter()
             val_acc_meter = AverageMeter()
@@ -358,36 +388,37 @@ def train(model, args):
                         is_training=False,
                     )
 
-        else:  # retraining
-            val_loss_meter = train_loss_meter
-            val_acc_meter = train_acc_meter
+            
+        tb_writer.add_scalar("Loss/val", val_loss_meter, epoch)
+        tb_writer.add_scalar("Accuracy/val", val_acc_meter, epoch)
+
 
         if best_val_acc < val_acc_meter.avg:
             best_val_epoch = epoch
             best_val_acc = val_acc_meter.avg
+            
             logger.write("New model best model at epoch %d\n" % epoch)
             torch.save(
                 model, os.path.join(args.log_dir, "best_model_%d.pth" % args.seed)
             )
-            # if best_val_acc >= 100: #in the case of retraining, stop when the model reaches 100% accuracy on both train + val sets
-            #    break
 
         train_loss_avg = train_loss_meter.avg
         val_loss_avg = val_loss_meter.avg
 
+        time_duration = time.time() - start_time
         logger.write(
-            "Epoch [%d]:\tTrain loss: %.4f\tTrain accuracy: %.4f\t"
-            "Val loss: %.4f\tVal acc: %.4f\t"
-            "Best val epoch: %d\n"
-            % (
-                epoch,
-                train_loss_avg,
-                train_acc_meter.avg,
-                val_loss_avg,
-                val_acc_meter.avg,
-                best_val_epoch,
-            )
+            " - ".join([
+                datetime.now().strftime("%H:%M:%S"),
+                f"Epoch [{epoch}]",
+                f"Train/loss: {train_loss_avg:.4f}",
+                f"Train/acc: {train_acc_meter.avg:.4f}",
+                f"Val/loss: {val_loss_avg:.4f}",
+                f"Val/acc: {val_acc_meter.avg:.4f}"
+                f"Best val epoch: {best_val_epoch}",
+                f"Time: {time_duration:.2f} sec"
+            ])
         )
+
         logger.flush()
 
         if epoch <= stop_epoch:
@@ -406,6 +437,21 @@ def train(model, args):
             print("Early stopping because acc hasn't improved for a long time")
             break
 
+
+def train_X_to_Proto_to_Y(args):
+    model = ModelXtoPrototoY(
+        n_class_attr=args.n_class_attr,
+        pretrained=args.pretrained,
+        freeze=args.freeze,
+        num_classes=N_CLASSES,
+        use_aux=args.use_aux,
+        n_attributes=args.n_attributes,
+        expand_dim=args.expand_dim,
+        use_relu=args.use_relu,
+        use_sigmoid=args.use_sigmoid,
+        num_vectors=args.n_proto_vectors,
+    )
+    train(model, args)
 
 def train_X_to_C(args):
     model = ModelXtoC(
@@ -482,6 +528,7 @@ def train_X_to_Cy(args):
     train(model, args)
 
 
+
 def train_probe(args):
     probe.run(args)
 
@@ -516,6 +563,7 @@ def parse_arguments(experiment):
             "TTI",
             "Robustness",
             "HyperparameterSearch",
+            "APN"
         ],
         help="Name of experiment to run.",
     )
@@ -672,4 +720,4 @@ def parse_arguments(experiment):
 
         args = parser.parse_args()
         args.three_class = args.n_class_attr == 3
-        return (args,)
+        return args

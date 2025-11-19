@@ -11,8 +11,10 @@ import torch.nn.functional as F
 import torch.utils.model_zoo as model_zoo
 import torchvision.models as tv_models
 
+from APN.protomod import ProtoMod
+
 # __all__ = ['MLP', 'Inception3', 'inception_v3', 'End2EndModel']
-__all__ = ["MLP", "Inception3", "inception_v3", "End2EndModel", "VGG16Net", "vgg16"]
+__all__ = ["MLP", "Inception3", "inception_v3", "End2EndModel", "VGG16Net", "vgg16", "ProtoInception3", "ProtoEnd2End"]
 
 model_urls = {
     # Downloaded inception model (optional)
@@ -22,144 +24,78 @@ model_urls = {
 }
 
 
-def vgg16(pretrained, freeze, **kwargs):
-    """
-    VGG16-based model with the same head interface as Inception3.
-    Supports: aux_logits, n_attributes, bottleneck, expand_dim, three_class, connect_CY
-    """
-    model = VGG16Net(pretrained=pretrained, freeze=freeze, **kwargs)
-    if not pretrained and hasattr(torch, "compile"):
-        model = torch.compile(model)
-    return model
-
-
-class VGG16Net(nn.Module):
+class ProtoModel(torch.nn.Module):
     def __init__(
-        self,
-        num_classes,
-        aux_logits=True,
-        n_attributes=0,
-        bottleneck=False,
-        expand_dim=0,
-        three_class=False,
-        connect_CY=False,
-        transform_input=False,
-        freeze=False,
-        pretrained=True,
+        self, model1, model2, use_relu=False, use_sigmoid=False, n_class_attr=2
     ):
-        super().__init__()
-        # backbone
-        try:
-            weights = tv_models.VGG16_Weights.IMAGENET1K_V1
-            backbone = tv_models.vgg16(weights=weights)
-        except Exception:
-            backbone = tv_models.vgg16(pretrained=True)
-        self.features = backbone.features
-        if transform_input:
-            # kept for API parity; VGG16 expects standard ImageNet normalization in data pipeline
-            self.transform_input = True
+        super(ProtoModel, self).__init__()
+        self.first_model = model1
+        self.sec_model = model2
+        self.use_relu = use_relu
+        self.use_sigmoid = use_sigmoid
+
+    def forward_stage2(self, stage1_out):
+        if self.use_relu:
+            attr_outputs = [nn.ReLU()(o) for o in stage1_out]
+        elif self.use_sigmoid:
+            attr_outputs = [torch.nn.Sigmoid()(o) for o in stage1_out]
         else:
-            self.transform_input = False
-        if freeze:
-            for p in self.features.parameters():
-                p.requires_grad = False
+            attr_outputs = stage1_out
 
-        self.aux_logits = aux_logits
-        self.n_attributes = n_attributes
-        self.bottleneck = bottleneck
-
-        # heads on pooled conv features (512D after conv5_3)
-        feat_dim = 512
-
-        self.all_fc = nn.ModuleList()
-        if connect_CY:
-            self.cy_fc = FC(n_attributes, num_classes, expand_dim)
-        else:
-            self.cy_fc = None
-
-        if self.n_attributes > 0:
-            if not bottleneck:  # multitask
-                self.all_fc.append(FC(feat_dim, num_classes, expand_dim))
-            for _ in range(self.n_attributes):
-                self.all_fc.append(FC(feat_dim, 1, expand_dim))
-        else:
-            self.all_fc.append(FC(feat_dim, num_classes, expand_dim))
-
-        if self.aux_logits:
-            self.AuxLogits = VGG16Aux(
-                feat_dim,
-                num_classes,
-                n_attributes=self.n_attributes,
-                bottleneck=bottleneck,
-                expand_dim=expand_dim,
-                connect_CY=connect_CY,
-            )
+        stage2_inputs = attr_outputs
+        stage2_inputs = torch.cat(stage2_inputs, dim=1)
+        all_out = [self.sec_model(stage2_inputs)]
+        all_out.extend(stage1_out)
+        return all_out
 
     def forward(self, x):
-        # B x 3 x H x W -> conv features
-        x = self.features(x)  # B x 512 x H' x W'
-        x = F.adaptive_avg_pool2d(x, (1, 1))
-        x = F.dropout(x, training=self.training)
-        x = x.view(x.size(0), -1)  # B x 512
-
-        out = []
-        for fc in self.all_fc:
-            out.append(fc(x))
-
-        if self.n_attributes > 0 and not self.bottleneck and self.cy_fc is not None:
-            attr_preds = torch.cat(out[1:], dim=1)
-            out[0] += self.cy_fc(attr_preds)
-
-        if self.training and self.aux_logits:
-            # reuse pre-pooled conv features for aux as well
-            # Build aux from the same pooled features; dedicated fc stack inside Aux
-            return out, self.AuxLogits_from_features(x)
+        if self.first_model.training:
+            outputs, aux_outputs = self.first_model(x)
+            return self.forward_stage2(outputs), self.forward_stage2(aux_outputs)
         else:
-            return out
+            outputs = self.first_model(x)
+            return self.forward_stage2(outputs)
 
-    def AuxLogits_from_features(self, pooled_flat):
-        # pooled_flat: B x 512
-        return self.AuxLogits(pooled_flat)
-
-
-class VGG16Aux(nn.Module):
+class ProtoEnd2End(torch.nn.Module):
     def __init__(
-        self,
-        feat_dim,
-        num_classes,
-        n_attributes=0,
-        bottleneck=False,
-        expand_dim=0,
-        connect_CY=False,
+        self, model1, model2, use_relu=False, use_sigmoid=False, n_class_attr=2
     ):
-        super().__init__()
-        self.n_attributes = n_attributes
-        self.bottleneck = bottleneck
-        self.all_fc = nn.ModuleList()
-        if connect_CY:
-            self.cy_fc = FC(n_attributes, num_classes, expand_dim)
+        super(End2EndModel, self).__init__()
+        self.first_model = model1
+        self.sec_model = model2
+        self.use_relu = use_relu
+        self.use_sigmoid = use_sigmoid
+        self.protomod = model1.protomod
+
+    def forward_stage2(self, stage1_out):
+        if self.use_relu:
+            attr_outputs = F.relu(stage1_out)
+        elif self.use_sigmoid:
+            attr_outputs = F.sigmoid(stage1_out)
         else:
-            self.cy_fc = None
+            attr_outputs = stage1_out
 
-        if n_attributes > 0:
-            if not bottleneck:
-                self.all_fc.append(FC(feat_dim, num_classes, expand_dim))
-            for _ in range(n_attributes):
-                self.all_fc.append(FC(feat_dim, 1, expand_dim))
+        all_out = [self.sec_model(attr_outputs)]
+        all_out.extend(stage1_out)
+        return all_out
+
+    def forward(self, x):
+        if self.first_model.training:
+            similarity_scores, attention_maps, aux_outputs = self.first_model(x)
+
+            return (
+                self.forward_stage2(similarity_scores),
+                similarity_scores,
+                attention_maps,
+                self.forward_stage2(aux_outputs),
+            )
         else:
-            self.all_fc.append(FC(feat_dim, num_classes, expand_dim))
-
-    def forward(self, pooled_flat):
-        out = []
-        for fc in self.all_fc:
-            out.append(fc(pooled_flat))
-
-        if self.n_attributes > 0 and not self.bottleneck and self.cy_fc is not None:
-            attr_preds = torch.cat(out[1:], dim=1)
-            out[0] += self.cy_fc(attr_preds)
-            
-        return out
-
+            similarity_scores, attention_maps = self.first_model(x)
+            return (
+                self.forward_stage2(similarity_scores),
+                similarity_scores,
+                attention_maps,
+            )
 
 class End2EndModel(torch.nn.Module):
     def __init__(
@@ -251,6 +187,176 @@ def inception_v3(pretrained, freeze, **kwargs):
     return model
 
 
+def proto_inception_v3(pretrained, freeze, **kwargs):
+    """Inception v3 model architecture from
+    `"Rethinking the Inception Architecture for Computer Vision" <http://arxiv.org/abs/1512.00567>`_.
+
+    .. note::
+        **Important**: In contrast to the other models the inception_v3 expects tensors with a size of
+        N x 3 x 299 x 299, so ensure your images are sized accordingly.
+
+    Args:
+        pretrained (bool): If True, returns a model pre-trained on ImageNet
+        transform_input (bool): If True, preprocesses the input according to the method with which it
+            was trained on ImageNet. Default: *False*
+    """
+    if pretrained:
+        if "transform_input" not in kwargs:
+            kwargs["transform_input"] = True
+        model = ProtoInception3(**kwargs)
+        if os.path.exists(model_urls.get("downloaded")):
+            model.load_partial_state_dict(torch.load(model_urls["downloaded"]))
+        else:
+            model.load_partial_state_dict(
+                model_zoo.load_url(model_urls["inception_v3_google"])
+            )
+        if freeze:  # only finetune fc layer
+            for name, param in model.named_parameters():
+                if "fc" not in name:  # and 'Mixed_7c' not in name:
+                    param.requires_grad = False
+        return model
+
+    model = ProtoInception3(**kwargs)
+
+    if hasattr(torch, "compile"):
+        model = torch.compile(model)
+
+    return model
+
+class ProtoInception3(nn.Module):
+    def __init__(
+        self,
+        num_classes,
+        aux_logits=True,
+        transform_input=False,
+        n_attributes=0,
+        bottleneck=False,
+        expand_dim=0,
+        three_class=False,
+        connect_CY=False,
+        num_vectors=1,
+    ):
+        """
+        Args:
+        num_classes: number of main task classes
+        aux_logits: whether to also output auxiliary logits
+        transform input: whether to invert the transformation by ImageNet (should be set to True later on)
+        n_attributes: number of attributes to predict
+        bottleneck: whether to make X -> A model
+        expand_dim: if not 0, add an additional fc layer with expand_dim neurons
+        three_class: whether to count not visible as a separate class for predicting attribute
+        """
+        super(Inception3, self).__init__()
+        self.aux_logits = aux_logits
+        self.transform_input = transform_input
+        self.n_attributes = n_attributes
+        self.bottleneck = bottleneck
+        self.Conv2d_1a_3x3 = BasicConv2d(3, 32, kernel_size=3, stride=2)
+        self.Conv2d_2a_3x3 = BasicConv2d(32, 32, kernel_size=3)
+        self.Conv2d_2b_3x3 = BasicConv2d(32, 64, kernel_size=3, padding=1)
+        self.Conv2d_3b_1x1 = BasicConv2d(64, 80, kernel_size=1)
+        self.Conv2d_4a_3x3 = BasicConv2d(80, 192, kernel_size=3)
+        self.Mixed_5b = InceptionA(192, pool_features=32)
+        self.Mixed_5c = InceptionA(256, pool_features=64)
+        self.Mixed_5d = InceptionA(288, pool_features=64)
+        self.Mixed_6a = InceptionB(288)
+        self.Mixed_6b = InceptionC(768, channels_7x7=128)
+        self.Mixed_6c = InceptionC(768, channels_7x7=160)
+        self.Mixed_6d = InceptionC(768, channels_7x7=160)
+        self.Mixed_6e = InceptionC(768, channels_7x7=192)
+
+        if aux_logits:
+            self.AuxLogits = InceptionAux(
+                768,
+                num_classes,
+                n_attributes=self.n_attributes,
+                bottleneck=bottleneck,
+                expand_dim=expand_dim,
+                three_class=three_class,
+                connect_CY=connect_CY,
+            )
+        final_channels = 2048
+        self.Mixed_7a = InceptionD(768)
+        self.Mixed_7b = InceptionE(1280)
+        self.Mixed_7c = InceptionE(final_channels)
+
+        self.protomod = ProtoMod(channel_dim=final_channels, kernel_size=8, num_vectors=num_vectors)
+
+        if connect_CY:
+            self.cy_fc = FC(n_attributes, num_classes, expand_dim)
+        else:
+            self.cy_fc = None
+
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
+                import scipy.stats as stats
+
+                stddev = m.stddev if hasattr(m, "stddev") else 0.1
+                X = stats.truncnorm(-2, 2, scale=stddev)
+                values = torch.as_tensor(X.rvs(m.weight.numel()), dtype=m.weight.dtype)
+                values = values.view(m.weight.size())
+                with torch.no_grad():
+                    m.weight.copy_(values)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+
+    def forward(self, x):
+        if self.transform_input:
+            x_ch0 = torch.unsqueeze(x[:, 0], 1) * (0.229 / 0.5) + (0.485 - 0.5) / 0.5
+            x_ch1 = torch.unsqueeze(x[:, 1], 1) * (0.224 / 0.5) + (0.456 - 0.5) / 0.5
+            x_ch2 = torch.unsqueeze(x[:, 2], 1) * (0.225 / 0.5) + (0.406 - 0.5) / 0.5
+            x = torch.cat((x_ch0, x_ch1, x_ch2), 1)
+        # N x 3 x 299 x 299
+        x = self.Conv2d_1a_3x3(x)
+        # N x 32 x 149 x 149
+        x = self.Conv2d_2a_3x3(x)
+        # N x 32 x 147 x 147
+        x = self.Conv2d_2b_3x3(x)
+        # N x 64 x 147 x 147
+        x = F.max_pool2d(x, kernel_size=3, stride=2)
+        # N x 64 x 73 x 73
+        x = self.Conv2d_3b_1x1(x)
+        # N x 80 x 73 x 73
+        x = self.Conv2d_4a_3x3(x)
+        # N x 192 x 71 x 71
+        x = F.max_pool2d(x, kernel_size=3, stride=2)  # N x 192 x 35 x 35
+        x = self.Mixed_5b(x)  # N x 256 x 35 x 35
+        x = self.Mixed_5c(x)  # N x 288 x 35 x 35
+        x = self.Mixed_5d(x)  # N x 288 x 35 x 35
+        x = self.Mixed_6a(x)  # N x 768 x 17 x 17
+        x = self.Mixed_6b(x)  # -> N x 768 x 17 x 17
+        x = self.Mixed_6c(x)  # -> N x 768 x 17 x 17
+        x = self.Mixed_6d(x)  # -> N x 768 x 17 x 17
+        x = self.Mixed_6e(x)  # -> N x 768 x 17 x 17
+
+        if self.training and self.aux_logits:
+            out_aux = self.AuxLogits(x)
+        # N x 768 x 17 x 17
+        x = self.Mixed_7a(x)  # N x 1280 x 8 x 8
+        x = self.Mixed_7b(x)  # N x 2048 x 8 x 8
+        x = self.Mixed_7c(x)  # N x 2048 x 8 x 8
+
+        # ---- APN INTEGRATION ----
+        similarity_scores, attention_maps = self.protomod(x)
+
+        if self.training and self.aux_logits:
+            return similarity_scores, attention_maps, out_aux
+        else:
+            return similarity_scores, attention_maps
+
+    def load_partial_state_dict(self, state_dict):
+        """
+        If dimensions of the current model doesn't match the pretrained one (esp for fc layer), load whichever weights that match
+        """
+        own_state = self.state_dict()
+        for name, param in state_dict.items():
+            if name not in own_state or "fc" in name:
+                continue
+            if isinstance(param, Parameter):
+                param = param.data
+            own_state[name].copy_(param)
+    
 class Inception3(nn.Module):
     def __init__(
         self,
