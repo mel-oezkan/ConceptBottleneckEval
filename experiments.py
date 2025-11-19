@@ -9,7 +9,7 @@ from CUB.train import (
     train_X_to_C_to_y,
     train_X_to_y,
     train_X_to_Cy,
-    train_X_to_y_with_aux_C,
+    # train_X_to_y_with_aux_C,
     train_probe,
     test_time_intervention,
     robustness,
@@ -17,48 +17,51 @@ from CUB.train import (
 )
 
 def run_experiments(dataset, args):
-    experiment = args[0].exp
+    experiment = args.exp
 
     if experiment == "Concept_XtoC":
-        train_X_to_C(*args)
+        train_X_to_C(args)
 
     elif experiment == "APN":
-        train_X_to_Proto_to_Y(*args)
+        train_X_to_Proto_to_Y(args)
 
     elif experiment == "Independent_CtoY":
-        train_oracle_C_to_y_and_test_on_Chat(*args)
+        train_oracle_C_to_y_and_test_on_Chat(args)
 
     elif experiment == "Sequential_CtoY":
-        train_Chat_to_y_and_test_on_Chat(*args)
+        train_Chat_to_y_and_test_on_Chat(args)
 
     elif experiment == "Joint":
-        train_X_to_C_to_y(*args)
+        train_X_to_C_to_y(args)
 
     elif experiment == "Standard":
-        train_X_to_y(*args)
+        train_X_to_y(args)
 
-    elif experiment == "StandardWithAuxC":
-        train_X_to_y_with_aux_C(*args)
+    # todo
+    # elif experiment == "StandardWithAuxC":
+    #     train_X_to_y_with_aux_C(args)
 
     elif experiment == "Multitask":
-        train_X_to_Cy(*args)
+        train_X_to_Cy(args)
 
     elif experiment == "Probe":
-        train_probe(*args)
+        train_probe(args)
 
     elif experiment == "TTI":
-        test_time_intervention(*args)
+        test_time_intervention(args)
 
     elif experiment == "Robustness":
-        robustness(*args)
+        robustness(args)
 
     elif experiment == "HyperparameterSearch":
-        hyperparameter_optimization(*args)
+        hyperparameter_optimization(args)
 
 
 
 def parse_exp_arguments():
     """Helper function to read the dataset and Model type"""
+
+    print(sys.argv)
 
     #! reading the dataset is currently not supported but might be
     #! a good idea for SUB etc.
@@ -94,7 +97,7 @@ if __name__ == "__main__":
     dataset, args = parse_exp_arguments()
 
     # Seeds
-    np.random.seed(args[0].seed)
-    torch.manual_seed(args[0].seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
 
     run_experiments(dataset, args)
