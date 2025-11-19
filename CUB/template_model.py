@@ -60,7 +60,7 @@ class ProtoEnd2End(torch.nn.Module):
     def __init__(
         self, model1, model2, use_relu=False, use_sigmoid=False, n_class_attr=2
     ):
-        super(End2EndModel, self).__init__()
+        super(ProtoEnd2End, self).__init__()
         self.first_model = model1
         self.sec_model = model2
         self.use_relu = use_relu
@@ -266,7 +266,7 @@ class ProtoInception3(nn.Module):
         self.Mixed_6e = InceptionC(768, channels_7x7=192)
 
         if aux_logits:
-            self.AuxLogits = InceptionAux(
+            self.AuxLogits = ProtoInceptionAux(
                 768,
                 num_classes,
                 n_attributes=self.n_attributes,
@@ -699,6 +699,71 @@ class InceptionE(nn.Module):
 
         outputs = [branch1x1, branch3x3, branch3x3dbl, branch_pool]
         return torch.cat(outputs, 1)
+
+
+
+class ProtoInceptionAux(nn.Module):
+    def __init__(
+        self,
+        in_channels,
+        num_classes,
+        n_attributes=0,
+        bottleneck=False,
+        expand_dim=0,
+        three_class=False,
+        connect_CY=False,
+    ):
+        super(ProtoInceptionAux, self).__init__()
+        self.conv0 = BasicConv2d(in_channels, 128, kernel_size=1)
+        self.conv1 = BasicConv2d(128, 768, kernel_size=5)
+        self.conv1.stddev = 0.01
+        self.n_attributes = n_attributes
+        self.bottleneck = bottleneck
+        self.expand_dim = expand_dim
+
+        if connect_CY:
+            self.cy_fc = FC(n_attributes, num_classes, expand_dim)
+        else:
+            self.cy_fc = None
+
+        self.all_fc = nn.ModuleList()
+
+        if n_attributes > 0:
+            if not bottleneck:  # cotraining
+                self.all_fc.append(FC(768, num_classes, expand_dim, stddev=0.001))
+            for i in range(self.n_attributes):
+                self.all_fc.append(FC(768, 1, expand_dim, stddev=0.001))
+        else:
+            self.all_fc.append(FC(768, num_classes, expand_dim, stddev=0.001))
+
+    def forward(self, x):
+        # input: N x 768 x 17 x 17
+        x = F.avg_pool2d(  # N x 768 x 5 x 5
+            x, kernel_size=5, stride=3
+        )
+        x = self.conv0(x)  # N x 128 x 5 x 5
+        x = self.conv1(x)  # N x 768 x 1 x 1
+        # Adaptive average pooling
+        x = F.adaptive_avg_pool2d(x, (1, 1))  # N x 768 x 1 x 1
+        x = x.view(x.size(0), -1)  # N x 768
+
+        # todo: pre-allocate the output list and fill in for loop
+        # batch_size = x.size(0)
+        # total_out_dim = sum(
+        #     1 if i > 0 else self.all_fc[0].fc.out_features
+        #     for i in range(len(self.all_fc))
+        # )
+        # out = torch.empty(batch_size, total_out_dim, device=x.device, dtype=x.dtype)
+
+        out = []
+        for fc in self.all_fc:
+            out.append(fc(x))
+
+        if self.n_attributes > 0 and not self.bottleneck and self.cy_fc is not None:
+            attr_preds = torch.cat(out[1:], dim=1)
+            out[0] += self.cy_fc(attr_preds)
+
+        return torch.cat(out, dim=1)
 
 
 class InceptionAux(nn.Module):
