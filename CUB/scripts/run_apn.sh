@@ -8,6 +8,7 @@ python experiments.py cub APN \
     -optimizer sgd \
     -pretrained \
     -use_aux \
+    -use_attr \
     -weighted_loss multiple \
     -data_dir data/CUB_processed/class_attr_data_10 \
     -n_attributes 112 \

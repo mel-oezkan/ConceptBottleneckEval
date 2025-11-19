@@ -96,17 +96,21 @@ def run_epoch_proto(
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     for _, data in enumerate(loader):
-        inputs, labels, attr_labels = data
-        if args.n_attributes > 1:
-            # attributes
-            attr_labels = torch.stack(attr_labels, dim=1).float()
-            print(attr_labels.shape)
+        if attr_criterion is None and protomod_criterion is None:
+            inputs, labels = data
+            attr_labels, attr_labels_var = None, None
         else:
-            if isinstance(attr_labels, list):
-                attr_labels = attr_labels[0]
-            attr_labels = attr_labels.unsqueeze(1).float()
-        attr_labels_var = attr_labels.to(device)
-
+            inputs, labels, attr_labels = data
+            if args.n_attributes > 1:
+                # attributes
+                attr_labels = torch.stack(attr_labels, dim=1).float()
+                print(attr_labels.shape)
+            else:
+                if isinstance(attr_labels, list):
+                    attr_labels = attr_labels[0]
+                attr_labels = attr_labels.unsqueeze(1).float()
+            attr_labels_var = attr_labels.to(device)
+            
         inputs_var = inputs.to(device)
         labels_var = labels.to(device)
 
