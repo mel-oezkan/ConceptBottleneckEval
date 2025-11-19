@@ -1,10 +1,13 @@
 
-from CUB.template_model import MLP, inception_v3, proto_inception_v3, End2EndModel, vgg16, ProtoEnd2End
+from CUB.template_model import MLP, inception_v3, proto_inception_v3, End2EndModel, ProtoEnd2End
 
 
 def _backbone(arch):
     #! ist mein alter code für vgg. Kann aber für DINO etc. verwendet werden glaube ich
-    return inception_v3 if arch == 'inception' else vgg16
+    if arch == "inception":
+        return inception_v3
+    else:
+        raise NotImplementedError(f"Architecture {arch} is not implemented.")
 
 
 def ModelXtoPrototoY(

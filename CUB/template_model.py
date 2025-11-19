@@ -246,7 +246,7 @@ class ProtoInception3(nn.Module):
         expand_dim: if not 0, add an additional fc layer with expand_dim neurons
         three_class: whether to count not visible as a separate class for predicting attribute
         """
-        super(Inception3, self).__init__()
+        super(ProtoInception3, self).__init__()
         self.aux_logits = aux_logits
         self.transform_input = transform_input
         self.n_attributes = n_attributes

@@ -176,7 +176,7 @@ def load_data(pkl_paths, use_attr, no_img, batch_size, uncertain_label=False, n_
         shuffle = False
     if resampling:
         sampler = BatchSampler(ImbalancedDatasetSampler(dataset), batch_size=batch_size, drop_last=drop_last)
-                loader = DataLoader(
+        loader = DataLoader(
             dataset, 
             batch_sampler=sampler,
             num_workers=4,  # Multi-process data loading
