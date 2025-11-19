@@ -217,7 +217,6 @@ def run_epoch(
     acc_meter,
     criterion,
     attr_criterion,
-    protomod_criterion: ProtoModLoss,
     args: argparse.Namespace,
     is_training: bool,
 ):
@@ -451,7 +450,7 @@ def train(model, args):
 
     for epoch in range(0, args.epochs):
         start_time = time.time()
-        
+
         train_loss_meter = AverageMeter()
         train_acc_meter = AverageMeter()
         if args.no_img:
@@ -466,7 +465,7 @@ def train(model, args):
                 is_training=True,
             )
         else:
-            if model.__class__.__name__ == "ModelXtoPrototoY":
+            if model.__class__.__name__ == "ProtoEnd2End":
                 reg_weights = {
                     "attribute_reg": 1.0,
                     "cpt": 1e-9,
@@ -867,6 +866,17 @@ def parse_arguments(experiment):
             type=str,
             default="inception",
             help="Backbone architecture to use: inception / vgg",
+        )
+        parser.add_argument(
+            "--device",
+            default="cuda",
+            help="Determines the device the model is supposed to run on.",
+        )
+        parser.add_argument(
+            "-n_proto_vectors",
+            type=int,
+            default=1,
+            help="Number of prototype vectors per attribute in ProtoMod.",
         )
 
         args = parser.parse_args()
