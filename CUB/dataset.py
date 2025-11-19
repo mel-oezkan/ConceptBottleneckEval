@@ -56,7 +56,7 @@ class CUBDataset(Dataset):
                 img_path = img_path.replace('images/', '')
             else:
                 img_path = '/'.join(img_path.split('/')[idx:])
-            img = Image.open(img_path).convert('RGB')
+            img = Image.open("data/" + img_path).convert('RGB')
         except:
             img_path_split = img_path.split('/')
             split = 'train' if self.is_train else 'test'
