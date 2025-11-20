@@ -1,6 +1,7 @@
 """
 Train InceptionV3 Network using the CUB-200-2011 dataset
 """
+
 import os
 import sys
 import argparse
@@ -110,9 +111,9 @@ def run_epoch_proto(
                     attr_labels = attr_labels[0]
                 attr_labels = attr_labels.unsqueeze(1).float()
                 attr_labels = attr_labels[CUB_SELECTED_ATTRIBUTES]
-                
+
             attr_labels_var = attr_labels.to(device)
-            
+
         inputs_var = inputs.to(device)
         labels_var = labels.to(device)
 
@@ -215,6 +216,7 @@ def run_epoch_proto(
 
     return loss_meter, acc_meter
 
+
 def run_epoch(
     model: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
@@ -251,9 +253,9 @@ def run_epoch(
                     attr_labels = attr_labels[0]
                 attr_labels = attr_labels.unsqueeze(1).float()
                 attr_labels = attr_labels[CUB_SELECTED_ATTRIBUTES]
-                
+
             attr_labels_var = attr_labels.to(device)
-            
+
         inputs_var = inputs.to(device)
         labels_var = labels.to(device)
         if is_training and args.use_aux:
@@ -277,14 +279,12 @@ def run_epoch(
                         * (
                             1.0
                             * attr_criterion[i](
-                                outputs[i + out_start]
-                                .squeeze(),
+                                outputs[i + out_start].squeeze(),
                                 attr_labels_var[:, i],
                             )
                             + 0.4
                             * attr_criterion[i](
-                                aux_outputs[i + out_start]
-                                .squeeze(),
+                                aux_outputs[i + out_start].squeeze(),
                                 attr_labels_var[:, i],
                             )
                         )
@@ -304,8 +304,7 @@ def run_epoch(
                     losses.append(
                         args.attr_loss_weight
                         * attr_criterion[i](
-                            outputs[i + out_start]
-                            .squeeze(),
+                            outputs[i + out_start].squeeze(),
                             attr_labels_var[:, i],
                         )
                     )
@@ -336,6 +335,7 @@ def run_epoch(
             optimizer.zero_grad()
             total_loss.backward()
             optimizer.step()
+
     return loss_meter, acc_meter
 
 
@@ -366,7 +366,7 @@ def train(model, args):
 
     model = model.to(device)
     criterion = torch.nn.CrossEntropyLoss()
-   
+
     attr_criterion = None
     if not model.__class__.__name__ == "ProtoEnd2End":
         #! only when not apn
@@ -376,7 +376,9 @@ def train(model, args):
                 assert imbalance is not None
                 for ratio in imbalance:
                     attr_criterion.append(
-                        torch.nn.BCEWithLogitsLoss(weight=torch.FloatTensor([ratio]).to(device))
+                        torch.nn.BCEWithLogitsLoss(
+                            weight=torch.FloatTensor([ratio]).to(device)
+                        )
                     )
             else:
                 for i in range(args.n_attributes):
@@ -477,9 +479,7 @@ def train(model, args):
                 }
                 use_groups = True
                 protomod_criterion = ProtoModLoss(
-                    model.protomod, 
-                    reg_weights, 
-                    use_groups
+                    model.protomod, reg_weights, use_groups
                 )
 
                 train_loss_meter, train_acc_meter = run_epoch_proto(
@@ -507,11 +507,8 @@ def train(model, args):
                     is_training=True,
                 )
 
-
-
-
         tb_writer.add_scalar("Loss/train", train_loss_meter.avg, epoch)
-        tb_writer.add_scalar("Accuracy/train", train_acc_meter.avg, epoch)
+        tb_writer.add_scalar("Accuracy/train", train_acc_meter.avg.item(), epoch)
 
         if not args.ckpt:  # evaluate on val set
             val_loss_meter = AverageMeter()
@@ -538,17 +535,15 @@ def train(model, args):
                         }
                         use_groups = True
                         protomod_criterion = ProtoModLoss(
-                            model.protomod, 
-                            reg_weights, 
-                            use_groups
+                            model.protomod, reg_weights, use_groups
                         )
 
                         train_loss_meter, train_acc_meter = run_epoch_proto(
                             model,
                             optimizer,
-                            train_loader,
-                            train_loss_meter,
-                            train_acc_meter,
+                            val_loader,
+                            val_loss_meter,
+                            val_acc_meter,
                             criterion,
                             attr_criterion,
                             protomod_criterion,
@@ -568,15 +563,13 @@ def train(model, args):
                             is_training=False,
                         )
 
-            
         tb_writer.add_scalar("Loss/val", val_loss_meter.avg, epoch)
-        tb_writer.add_scalar("Accuracy/val", val_acc_meter.avg, epoch)
-
+        tb_writer.add_scalar("Accuracy/val", val_acc_meter.avg.item(), epoch)
 
         if best_val_acc < val_acc_meter.avg:
             best_val_epoch = epoch
             best_val_acc = val_acc_meter.avg
-            
+
             logger.write("New model best model at epoch %d\n" % epoch)
             torch.save(
                 model, os.path.join(args.log_dir, "best_model_%d.pth" % args.seed)
@@ -587,16 +580,18 @@ def train(model, args):
 
         time_duration = time.time() - start_time
         logger.write(
-            " - ".join([
-                datetime.now().strftime("%H:%M:%S"),
-                f"Epoch [{epoch}]",
-                f"Train/loss: {train_loss_avg:.4f}",
-                f"Train/acc: {train_acc_meter.avg:.4f}",
-                f"Val/loss: {val_loss_avg:.4f}",
-                f"Val/acc: {val_acc_meter.avg:.4f}"
-                f"Best val epoch: {best_val_epoch}",
-                f"Time: {time_duration:.2f} sec"
-            ])
+            " - ".join(
+                [
+                    datetime.now().strftime("%H:%M:%S"),
+                    f"Epoch [{epoch}]",
+                    f"Train/loss: {train_loss_avg:.4f}",
+                    f"Train/acc: {train_acc_meter.avg.item():.4f}",
+                    f"Val/loss: {val_loss_avg:.4f}",
+                    f"Val/acc: {val_acc_meter.avg.item():.4f}"
+                    f"Best val epoch: {best_val_epoch}",
+                    f"Time: {time_duration:.2f} sec",
+                ]
+            )
         )
 
         logger.flush()
@@ -632,6 +627,7 @@ def train_X_to_Proto_to_Y(args):
         num_vectors=args.n_proto_vectors,
     )
     train(model, args)
+
 
 def train_X_to_C(args):
     model = ModelXtoC(
@@ -708,7 +704,6 @@ def train_X_to_Cy(args):
     train(model, args)
 
 
-
 def train_probe(args):
     probe.run(args)
 
@@ -743,7 +738,7 @@ def parse_arguments(experiment):
             "TTI",
             "Robustness",
             "HyperparameterSearch",
-            "APN"
+            "APN",
         ],
         help="Name of experiment to run.",
     )
