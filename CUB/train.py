@@ -472,14 +472,8 @@ def train(model, args):
             )
         else:
             if model.__class__.__name__ == "ProtoEnd2End":
-                reg_weights = {
-                    "attribute_reg": 1.0,
-                    "cpt": 1e-9,
-                    "decorrelation": 4e-2,
-                }
-                use_groups = True
                 protomod_criterion = ProtoModLoss(
-                    model.protomod, reg_weights, use_groups
+                    model.protomod, args
                 )
 
                 train_loss_meter, train_acc_meter = run_epoch_proto(
@@ -528,12 +522,6 @@ def train(model, args):
                     )
                 else:
                     if model.__class__.__name__ == "ProtoEnd2End":
-                        reg_weights = {
-                            "attribute_reg": 1.0,
-                            "cpt": 1e-9,
-                            "decorrelation": 4e-2,
-                        }
-                        use_groups = True
                         protomod_criterion = ProtoModLoss(
                             model.protomod, reg_weights, use_groups
                         )
@@ -612,8 +600,11 @@ def train(model, args):
             print("Early stopping because acc hasn't improved for a long time")
             break
 
+    # For hyperparameter search
+    return best_val_acc
 
-def train_X_to_Proto_to_Y(args):
+
+def train_X_to_Proto_to_Y(args) -> float:
     model = ModelXtoPrototoY(
         n_class_attr=args.n_class_attr,
         pretrained=args.pretrained,
@@ -624,12 +615,12 @@ def train_X_to_Proto_to_Y(args):
         expand_dim=args.expand_dim,
         use_relu=args.use_relu,
         use_sigmoid=args.use_sigmoid,
-        num_vectors=args.n_proto_vectors,
+        num_vectors=args.proto_n_vectors,
     )
-    train(model, args)
+    return train(model, args)
 
 
-def train_X_to_C(args):
+def train_X_to_C(args) -> float:
     model = ModelXtoC(
         pretrained=args.pretrained,
         freeze=args.freeze,
@@ -640,17 +631,17 @@ def train_X_to_C(args):
         three_class=args.three_class,
         arch=args.arch,
     )
-    train(model, args)
+    return train(model, args)
 
 
-def train_oracle_C_to_y_and_test_on_Chat(args):
+def train_oracle_C_to_y_and_test_on_Chat(args) -> float:
     model = ModelOracleCtoY(
         n_class_attr=args.n_class_attr,
         n_attributes=args.n_attributes,
         num_classes=N_CLASSES,
         expand_dim=args.expand_dim,
     )
-    train(model, args)
+    return train(model, args)
 
 
 def train_Chat_to_y_and_test_on_Chat(args):
@@ -663,7 +654,7 @@ def train_Chat_to_y_and_test_on_Chat(args):
     train(model, args)
 
 
-def train_X_to_C_to_y(args):
+def train_X_to_C_to_y(args) -> float:
     model = ModelXtoCtoY(
         n_class_attr=args.n_class_attr,
         pretrained=args.pretrained,
@@ -676,10 +667,10 @@ def train_X_to_C_to_y(args):
         use_sigmoid=args.use_sigmoid,
         arch=args.arch,
     )
-    train(model, args)
+    return train(model, args)
 
 
-def train_X_to_y(args):
+def train_X_to_y(args) -> float:
     model = ModelXtoY(
         pretrained=args.pretrained,
         freeze=args.freeze,
@@ -687,10 +678,10 @@ def train_X_to_y(args):
         use_aux=args.use_aux,
         arch=args.arch,
     )
-    train(model, args)
+    return train(model, args)
 
 
-def train_X_to_Cy(args):
+def train_X_to_Cy(args) -> float:
     model = ModelXtoCY(
         pretrained=args.pretrained,
         freeze=args.freeze,
@@ -701,7 +692,7 @@ def train_X_to_Cy(args):
         connect_CY=args.connect_CY,
         arch=args.arch,
     )
-    train(model, args)
+    return train(model, args)
 
 
 def train_probe(args):
@@ -720,7 +711,7 @@ def hyperparameter_optimization(args):
     hyperopt.run(args)
 
 
-def parse_arguments(experiment):
+def parse_arguments(experiment, arguments = None):
     # Get argparse configs from user
     parser = argparse.ArgumentParser(description="CUB Training")
     parser.add_argument("dataset", type=str, help="Name of the dataset.")
@@ -897,13 +888,37 @@ def parse_arguments(experiment):
             default="cuda",
             help="Determines the device the model is supposed to run on.",
         )
+        # Protomod specific arguments
         parser.add_argument(
-            "-n_proto_vectors",
+            "-proto_n_vectors",
             type=int,
             default=1,
             help="Number of prototype vectors per attribute in ProtoMod.",
         )
+        parser.add_argument(
+            "-proto_use_groups",
+            action="store_true",
+            help="Whether to apply regularization per group in ProtoMod."
+        )
+        parser.add_argument(
+            "-proto_weight_attribute_reg",
+            type=float,
+            default=1.0,
+            help="Weight for attribute regularization in ProtoMod.",
+        )
+        parser.add_argument(
+            "-proto_weight_cpt",
+            type=float,
+            default=1e-9,
+            help="Weight for concept prototype regularization in ProtoMod.",
+        )
+        parser.add_argument(
+            "-proto_weight_decorrelation",
+            type=float,
+            default=4e-2,
+            help="Weight for decorrelation regularization in ProtoMod.",
+        )
 
-        args = parser.parse_args()
+        args = parser.parse_args(arguments)
         args.three_class = args.n_class_attr == 3
         return args
