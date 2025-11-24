@@ -1,3 +1,5 @@
+rm -r outputs/test2/tensorboard
+
 python experiments.py cub APN \
     --seed 1 \
     -ckpt "" \

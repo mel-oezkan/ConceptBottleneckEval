@@ -91,7 +91,6 @@ def parse_exp_arguments():
 
 
 if __name__ == "__main__":
-if __name__ == "__main__":
     import torch
     import numpy as np
 

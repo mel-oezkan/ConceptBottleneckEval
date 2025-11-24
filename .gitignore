@@ -1,5 +1,4 @@
 *pkl
-*slurm
 *out
 .ipynb_checkpoints/
 *pyc
@@ -15,10 +14,3 @@ uv.lock
 pyproject.toml
 */__pycache__
 __pycache__
-.vscode/
-data/
-outputs
-models
-CUB_200_2011/
-CUB/pretrained
-/pretrained
