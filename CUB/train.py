@@ -615,7 +615,7 @@ def train_X_to_Proto_to_Y(args) -> float:
         expand_dim=args.expand_dim,
         use_relu=args.use_relu,
         use_sigmoid=args.use_sigmoid,
-        num_vectors=args.n_proto_vectors,
+        num_vectors=args.proto_n_vectors,
     )
     return train(model, args)
 
