@@ -1,9 +1,53 @@
 
-from CUB.template_model import MLP, inception_v3, End2EndModel, vgg16
+from CUB.template_model import MLP, inception_v3, proto_inception_v3, End2EndModel, ProtoEnd2End
 
 
 def _backbone(arch):
-    return inception_v3 if arch == 'inception' else vgg16
+    #! ist mein alter code für vgg. Kann aber für DINO etc. verwendet werden glaube ich
+    if arch == "inception":
+        return inception_v3
+    else:
+        raise NotImplementedError(f"Architecture {arch} is not implemented.")
+
+
+def ModelXtoPrototoY(
+    n_class_attr,
+    pretrained,
+    freeze,
+    num_classes,
+    use_aux,
+    n_attributes, # default should be 112 (paper)
+    expand_dim,
+    use_relu,
+    use_sigmoid,
+    num_vectors # Number of prototype vectors per attribute
+):
+    model1 = proto_inception_v3(
+        pretrained=pretrained,
+        freeze=freeze,
+        num_classes=num_classes,
+        aux_logits=use_aux,
+        n_attributes=n_attributes,
+        bottleneck=True,
+        expand_dim=expand_dim,
+        three_class=(n_class_attr == 3),
+        num_vectors=num_vectors,
+    )
+    if n_class_attr == 3:
+        model2 = MLP(
+            input_dim=n_attributes * n_class_attr,
+            num_classes=num_classes,
+            expand_dim=expand_dim,
+        )
+    else:
+        model2 = MLP(
+            input_dim=n_attributes, 
+            num_classes=num_classes, 
+            expand_dim=expand_dim
+        )
+        
+    return ProtoEnd2End(model1, model2, use_relu, use_sigmoid, n_class_attr)
+
 
 # Independent & Sequential Model
 def ModelXtoC(pretrained, freeze, num_classes, use_aux, n_attributes, expand_dim, three_class, arch="inception"):

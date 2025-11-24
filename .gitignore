@@ -4,6 +4,13 @@
 *pyc
 .idea/
 data/
-pretrained/
-.DS_Store
+.vscode/
 data/
+outputs
+models
+CUB_200_2011/
+CUB/pretrained
+uv.lock
+pyproject.toml
+*/__pycache__
+__pycache__

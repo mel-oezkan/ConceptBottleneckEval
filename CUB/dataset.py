@@ -56,7 +56,7 @@ class CUBDataset(Dataset):
                 img_path = img_path.replace('images/', '')
             else:
                 img_path = '/'.join(img_path.split('/')[idx:])
-            img = Image.open(img_path).convert('RGB')
+            img = Image.open("data/" + img_path).convert('RGB')
         except:
             img_path_split = img_path.split('/')
             split = 'train' if self.is_train else 'test'
@@ -176,9 +176,24 @@ def load_data(pkl_paths, use_attr, no_img, batch_size, uncertain_label=False, n_
         shuffle = False
     if resampling:
         sampler = BatchSampler(ImbalancedDatasetSampler(dataset), batch_size=batch_size, drop_last=drop_last)
-        loader = DataLoader(dataset, batch_sampler=sampler)
+        loader = DataLoader(
+            dataset, 
+            batch_sampler=sampler,
+            num_workers=4,  # Multi-process data loading
+            pin_memory=True,  # Faster GPU transfer
+            persistent_workers=True,  # Keep workers alive between epochs
+        )
     else:
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, drop_last=drop_last)
+        loader = DataLoader(
+            dataset, 
+            batch_size=batch_size, 
+            shuffle=shuffle, 
+            drop_last=drop_last,
+            num_workers=4,  # Multi-process data loading
+            pin_memory=True,  # Faster GPU transfer
+            persistent_workers=True,  # Keep workers alive between epochs
+        )
     return loader
 
 def find_class_imbalance(pkl_file, multiple_attr=False, attr_idx=-1):
