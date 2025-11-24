@@ -53,12 +53,18 @@ def run_epoch_simple(
         model.eval()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     for _, data in enumerate(loader):
         inputs, labels = data
         if isinstance(inputs, list):
             # inputs = [i.long() for i in inputs]
+            # inputs = [i.long() for i in inputs]
             inputs = torch.stack(inputs).t().float()
         inputs = torch.flatten(inputs, start_dim=1).float()
+        inputs_var = inputs.to(device)
+        labels_var = labels.to(device)
+
         inputs_var = inputs.to(device)
         labels_var = labels.to(device)
 
@@ -70,7 +76,9 @@ def run_epoch_simple(
 
         if is_training:
             optimizer.zero_grad()  # zero the parameter gradients
+            optimizer.zero_grad()  # zero the parameter gradients
             loss.backward()
+            optimizer.step()  # optimizer step to update parameters
             optimizer.step()  # optimizer step to update parameters
     return loss_meter, acc_meter
 
@@ -239,7 +247,8 @@ def run_epoch(
         model.eval()
 
     for _, data in enumerate(loader):
-        if attr_criterion is None:
+        #! wann ist das überhaupt ein Fall?
+        if attr_criterion is None and protomod_criterion is None:
             inputs, labels = data
             attr_labels, attr_labels_var = None, None
         else:
@@ -259,8 +268,9 @@ def run_epoch(
         inputs_var = inputs.to(device)
         labels_var = labels.to(device)
         if is_training and args.use_aux:
-            outputs, aux_outputs = model(inputs_var)
+            outputs, similarity_scores, attention_maps, aux_outputs = model(inputs_var)
             losses = []
+            log_losses = []
             out_start = 0
             if (
                 not args.bottleneck
@@ -268,8 +278,18 @@ def run_epoch(
                 loss_main = 1.0 * criterion(outputs[0], labels_var) + 0.4 * criterion(
                     aux_outputs[0], labels_var
                 )
+            if (
+                not args.bottleneck
+            ):  # loss main is for the main task label (always the first output)
+                loss_main = 1.0 * criterion(outputs[0], labels_var) + 0.4 * criterion(
+                    aux_outputs[0], labels_var
+                )
                 losses.append(loss_main)
+                log_losses.append(loss_main.item())
                 out_start = 1
+            if (
+                attr_criterion is not None and args.attr_loss_weight > 0
+            ):  # X -> A, cotraining, end2end
             if (
                 attr_criterion is not None and args.attr_loss_weight > 0
             ):  # X -> A, cotraining, end2end
@@ -292,11 +312,16 @@ def run_epoch(
         else:  # testing or no aux logits
             outputs = model(inputs_var)
             losses = []
+            log_losses = []
             out_start = 0
             if not args.bottleneck:
                 loss_main = criterion(outputs[0], labels_var)
                 losses.append(loss_main)
+                log_losses.append(loss_main.item())
                 out_start = 1
+            if (
+                attr_criterion is not None and args.attr_loss_weight > 0
+            ):  # X -> A, cotraining, end2end
             if (
                 attr_criterion is not None and args.attr_loss_weight > 0
             ):  # X -> A, cotraining, end2end
@@ -310,10 +335,14 @@ def run_epoch(
                     )
 
         if args.bottleneck:  # attribute accuracy
+        if args.bottleneck:  # attribute accuracy
             sigmoid_outputs = torch.nn.Sigmoid()(torch.cat(outputs, dim=1))
             acc = binary_accuracy(sigmoid_outputs, attr_labels)
             acc_meter.update(acc.data.cpu().numpy(), inputs.size(0))
         else:
+            acc = accuracy(
+                outputs[0], labels, topk=(1,)
+            )  # only care about class prediction accuracy
             acc = accuracy(
                 outputs[0], labels, topk=(1,)
             )  # only care about class prediction accuracy
@@ -323,14 +352,22 @@ def run_epoch(
             if args.bottleneck:
                 total_loss = sum(losses) / args.n_attributes
             else:  # cotraining, loss by class prediction and loss by attribute prediction have the same weight
+                total_loss = sum(losses) / args.n_attributes
+            else:  # cotraining, loss by class prediction and loss by attribute prediction have the same weight
                 total_loss = losses[0] + sum(losses[1:])
                 if args.normalize_loss:
                     total_loss = total_loss / (
                         1 + args.attr_loss_weight * args.n_attributes
                     )
         else:  # finetune
+                    total_loss = total_loss / (
+                        1 + args.attr_loss_weight * args.n_attributes
+                    )
+        else:  # finetune
             total_loss = sum(losses)
-        loss_meter.update(total_loss.item(), inputs.size(0))
+        loss_meter.update(np.array([
+            total_loss.item(), log_losses[0], log_losses[1], log_losses[2], log_losses[3]
+        ]), inputs.size(0))
         if is_training:
             optimizer.zero_grad()
             total_loss.backward()
@@ -339,7 +376,10 @@ def run_epoch(
     return loss_meter, acc_meter
 
 
+
 def train(model, args):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Determine imbalance
@@ -347,10 +387,13 @@ def train(model, args):
     if args.use_attr and not args.no_img and args.weighted_loss:
         train_data_path = os.path.join(BASE_DIR, args.data_dir, "train.pkl")
         if args.weighted_loss == "multiple":
+        train_data_path = os.path.join(BASE_DIR, args.data_dir, "train.pkl")
+        if args.weighted_loss == "multiple":
             imbalance = find_class_imbalance(train_data_path, True)
         else:
             imbalance = find_class_imbalance(train_data_path, False)
 
+    if os.path.exists(args.log_dir):  # job restarted by cluster
     if os.path.exists(args.log_dir):  # job restarted by cluster
         for f in os.listdir(args.log_dir):
             os.remove(os.path.join(args.log_dir, f))
@@ -360,8 +403,14 @@ def train(model, args):
     logger = Logger(os.path.join(args.log_dir, "log.txt"))
     logger.write(str(args) + "\n")
     logger.write(str(imbalance) + "\n")
+    logger = Logger(os.path.join(args.log_dir, "log.txt"))
+    logger.write(str(args) + "\n")
+    logger.write(str(imbalance) + "\n")
     logger.flush()
 
+    tb_writer = SummaryWriter(log_dir=os.path.join(args.log_dir, "tensorboard"))
+
+    model = model.to(device)
     tb_writer = SummaryWriter(log_dir=os.path.join(args.log_dir, "tensorboard"))
 
     model = model.to(device)
@@ -411,8 +460,24 @@ def train(model, args):
     stop_epoch = (
         int(math.log(MIN_LR / args.lr) / math.log(LR_DECAY_SIZE)) * args.scheduler_step
     )
+        optimizer = torch.optim.SGD(
+            filter(lambda p: p.requires_grad, model.parameters()),
+            lr=args.lr,
+            momentum=0.9,
+            weight_decay=args.weight_decay,
+        )
+    # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', factor=0.1, patience=5, threshold=0.00001, min_lr=0.00001, eps=1e-08)
+    scheduler = torch.optim.lr_scheduler.StepLR(
+        optimizer, step_size=args.scheduler_step, gamma=0.1
+    )
+    stop_epoch = (
+        int(math.log(MIN_LR / args.lr) / math.log(LR_DECAY_SIZE)) * args.scheduler_step
+    )
     print("Stop epoch: ", stop_epoch)
 
+    train_data_path = os.path.join(BASE_DIR, args.data_dir, "train.pkl")
+    val_data_path = train_data_path.replace("train.pkl", "val.pkl")
+    logger.write("train data path: %s\n" % train_data_path)
     train_data_path = os.path.join(BASE_DIR, args.data_dir, "train.pkl")
     val_data_path = train_data_path.replace("train.pkl", "val.pkl")
     logger.write("train data path: %s\n" % train_data_path)
@@ -449,8 +514,27 @@ def train(model, args):
             image_dir=args.image_dir,
             n_class_attr=args.n_class_attr,
         )
+        train_loader = load_data(
+            [train_data_path],
+            args.use_attr,
+            args.no_img,
+            args.batch_size,
+            args.uncertain_labels,
+            image_dir=args.image_dir,
+            n_class_attr=args.n_class_attr,
+            resampling=args.resampling,
+        )
+        val_loader = load_data(
+            [val_data_path],
+            args.use_attr,
+            args.no_img,
+            args.batch_size,
+            image_dir=args.image_dir,
+            n_class_attr=args.n_class_attr,
+        )
 
     best_val_epoch = -1
+    best_val_loss = float("inf")
     best_val_loss = float("inf")
     best_val_acc = 0
 
@@ -460,6 +544,16 @@ def train(model, args):
         train_loss_meter = AverageMeter()
         train_acc_meter = AverageMeter()
         if args.no_img:
+            train_loss_meter, train_acc_meter = run_epoch_simple(
+                model,
+                optimizer,
+                train_loader,
+                train_loss_meter,
+                train_acc_meter,
+                criterion,
+                args,
+                is_training=True,
+            )
             train_loss_meter, train_acc_meter = run_epoch_simple(
                 model,
                 optimizer,
@@ -584,10 +678,14 @@ def train(model, args):
 
         logger.flush()
 
+
         if epoch <= stop_epoch:
             scheduler.step(epoch)  # scheduler step to update lr at the end of epoch
         # inspect lr
+            scheduler.step(epoch)  # scheduler step to update lr at the end of epoch
+        # inspect lr
         if epoch % 10 == 0:
+            print("Current lr:", scheduler.get_lr())
             print("Current lr:", scheduler.get_lr())
 
         # if epoch % args.save_step == 0:
@@ -644,7 +742,14 @@ def train_oracle_C_to_y_and_test_on_Chat(args) -> float:
     return train(model, args)
 
 
+
 def train_Chat_to_y_and_test_on_Chat(args):
+    model = ModelXtoChat_ChatToY(
+        n_class_attr=args.n_class_attr,
+        n_attributes=args.n_attributes,
+        num_classes=N_CLASSES,
+        expand_dim=args.expand_dim,
+    )
     model = ModelXtoChat_ChatToY(
         n_class_attr=args.n_class_attr,
         n_attributes=args.n_attributes,
@@ -695,16 +800,20 @@ def train_X_to_Cy(args) -> float:
     return train(model, args)
 
 
+
 def train_probe(args):
     probe.run(args)
+
 
 
 def test_time_intervention(args):
     tti.run(args)
 
 
+
 def robustness(args):
     gen_cub_synthetic.run(args)
+
 
 
 def hyperparameter_optimization(args):
@@ -736,14 +845,18 @@ def parse_arguments(experiment, arguments = None):
     parser.add_argument("--seed", required=True, type=int, help="Numpy and torch seed.")
 
     if experiment == "Probe":
+    if experiment == "Probe":
         return (probe.parse_arguments(parser),)
 
+    elif experiment == "TTI":
     elif experiment == "TTI":
         return (tti.parse_arguments(parser),)
 
     elif experiment == "Robustness":
+    elif experiment == "Robustness":
         return (gen_cub_synthetic.parse_arguments(parser),)
 
+    elif experiment == "HyperparameterSearch":
     elif experiment == "HyperparameterSearch":
         return (hyperopt.parse_arguments(parser),)
 

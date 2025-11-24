@@ -8,6 +8,7 @@ import numpy as np
 import torchvision.transforms as transforms
 
 from PIL import Image
+from APN.apn_consts import PART_SEG_GROUPS
 from CUB.config import BASE_DIR, N_ATTRIBUTES
 from torch.utils.data import BatchSampler
 from torch.utils.data import Dataset, DataLoader
@@ -52,8 +53,11 @@ class CUBDataset(Dataset):
         try:
             idx = img_path.split('/').index('CUB_200_2011')
             if self.image_dir != 'images':
-                img_path = '/'.join([self.image_dir] + img_path.split('/')[idx+1:])
-                img_path = img_path.replace('images/', '')
+                if "images" in self.image_dir:
+                    img_path = '/'.join([self.image_dir] + img_path.split('/')[idx+2:])
+                else:
+                    img_path = '/'.join([self.image_dir] + img_path.split('/')[idx+1:])
+                    img_path = img_path.replace('images/', '')
             else:
                 img_path = '/'.join(img_path.split('/')[idx:])
             img = Image.open("data/" + img_path).convert('RGB')
@@ -83,6 +87,106 @@ class CUBDataset(Dataset):
                 return img, class_label, attr_label
         else:
             return img, class_label
+
+
+class CUBDatasetPartSegmentations(Dataset):
+    """
+    Returns a compatible Torch Dataset object customized for the CUB dataset
+    """
+
+    def __init__(self, test_pkl_path, use_attr, image_dir, part_seg_dir, resol, transform):
+        """
+        Arguments:
+        test_pkl_path: full path to test pkl
+        use_attr: whether to load the attributes (e.g. False for simple finetune)
+        image_dir: default = 'images'. Will be append to the parent dir
+        part_seg_dir: Path to part segmentation directory
+        transform: whether to apply any special transformation. Default = None, i.e. use standard ImageNet preprocessing
+        """
+        self.data = []
+        assert "test" in test_pkl_path
+        assert use_attr
+        self.data = pickle.load(open(test_pkl_path, 'rb'))
+
+        # Filter data to remove all classes for which no part segmentations exist (--> class_label > 70), +1 as it is zero-indexed
+        self.data = [d for d in self.data if d.get("class_label") + 1 <= 70]
+
+        self.transform = transform
+        self.resol = resol
+        self.image_dir = image_dir
+        self.part_seg_dir = part_seg_dir
+
+        self.mask_transform = transforms.Compose([
+            transforms.CenterCrop(299),         
+            transforms.ToTensor(),                          
+            lambda t: (t > 0.5).float()  # binarize
+        ])
+
+    def __len__(self):
+        return len(self.data)
+
+    def _load_mask(self, path_to_mask):
+        # Not all parts are segmented for each img (e.g. occlusion), fill with zeros
+        if not os.path.exists(path_to_mask):
+            return torch.zeros(1, self.resol, self.resol, dtype=torch.float32)
+
+        # If it exists: get part segmentation mask for this image / part pair
+        mask = Image.open(path_to_mask).convert("L")  # 'L' = grayscale
+
+        # Apply transformations to it (center crop like image, then binarize and add dummy channel dim)
+        return self.mask_transform(mask)
+    
+    def __getitem__(self, idx):
+        img_data = self.data[idx]
+        img_path = img_data['img_path']
+        
+        # Trim unnecessary paths
+        idx = img_path.split('/').index('CUB_200_2011')
+        if self.image_dir != 'images':
+            if "images" in self.image_dir:
+                img_path = '/'.join([self.image_dir] + img_path.split('/')[idx+2:])
+            else:
+                img_path = '/'.join([self.image_dir] + img_path.split('/')[idx+1:])
+                img_path = img_path.replace('images/', '')
+        else:
+            img_path = '/'.join(img_path.split('/')[idx:])
+        img = Image.open(img_path).convert('RGB')
+        img = self.transform(img)
+
+        # Get the class number, e.g. 002 for Laysan_Albatross, strip initial numbers, also get img name w/out extension
+        class_nr = str(int(img_path.split("/")[-2][:3]))
+        img_name = img_path.split("/")[-1].split(".")[0]
+
+        # Collect all part segmentation masks
+        part_lst = []
+        for part in PART_SEG_GROUPS:
+
+            # IMPORTANT: For left / right distinctions, we add the masks to one.
+            part_list = [part]
+            if part in ["eye", "wing", "leg"]:
+                part_list = [f"right_{part}", f"left_{part}"]
+
+            tmp_masks = []
+            for tmp_part in part_list:
+                tmp_masks.append(
+                    self._load_mask(
+                        os.path.join(self.part_seg_dir, "AnnotationMasksPerclass", class_nr, f"{img_name}_{tmp_part}.png")
+                    )
+                )
+            
+            # Combine masks, if needed, and add to part_lst.
+            if len(tmp_masks) == 1:
+                combined_mask = tmp_masks[0]
+            else:
+                combined_mask = ((tmp_masks[0] > 0) | (tmp_masks[1] > 0)).to(tmp_masks[0].dtype)
+            part_lst.append(combined_mask)
+
+        part_seg_masks = torch.cat(part_lst, dim=0)  # (num_parts, H, W)
+
+        class_label = img_data['class_label']
+
+        attr_label = img_data['attribute_label']
+        return img, class_label, attr_label, part_seg_masks
 
 
 class ImbalancedDatasetSampler(torch.utils.data.sampler.Sampler):
@@ -184,7 +288,6 @@ def load_data(pkl_paths, use_attr, no_img, batch_size, uncertain_label=False, n_
             persistent_workers=True,  # Keep workers alive between epochs
         )
     else:
-        loader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, drop_last=drop_last)
         loader = DataLoader(
             dataset, 
             batch_size=batch_size, 
@@ -226,6 +329,7 @@ def find_class_imbalance(pkl_file, multiple_attr=False, attr_idx=-1):
                 n_ones[0] += sum(labels)
     for j in range(len(n_ones)):
         imbalance_ratio.append(total[j]/n_ones[j] - 1)
+        
     if not multiple_attr: #e.g. [9.0] --> [9.0] * 312
         imbalance_ratio *= n_attr
     return imbalance_ratio

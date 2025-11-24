@@ -3,6 +3,7 @@ InceptionV3 Network modified from https://github.com/pytorch/vision/blob/master/
 New changes: add softmax layer option for freezing lower layers except fc
 """
 
+
 import os
 import torch
 import torch.nn as nn
@@ -19,7 +20,9 @@ __all__ = ["MLP", "Inception3", "inception_v3", "End2EndModel", "VGG16Net", "vgg
 model_urls = {
     # Downloaded inception model (optional)
     "downloaded": "pretrained/inception_v3_google-1a9a5a14.pth",
+    "downloaded": "pretrained/inception_v3_google-1a9a5a14.pth",
     # Inception v3 ported from TensorFlow
+    "inception_v3_google": "https://download.pytorch.org/models/inception_v3_google-1a9a5a14.pth",
     "inception_v3_google": "https://download.pytorch.org/models/inception_v3_google-1a9a5a14.pth",
 }
 
@@ -129,6 +132,88 @@ class End2EndModel(torch.nn.Module):
             outputs = self.first_model(x)
             return self.forward_stage2(outputs)
 
+class ProtoEnd2End(torch.nn.Module):
+    def __init__(
+        self, model1, model2, use_relu=False, use_sigmoid=False, n_class_attr=2
+    ):
+        super(ProtoEnd2End, self).__init__()
+        self.first_model = model1
+        self.sec_model = model2
+        self.use_relu = use_relu
+        self.use_sigmoid = use_sigmoid
+        self.protomod = model1.protomod
+
+    def forward_stage2(self, stage1_out):
+        if self.use_relu:
+            attr_outputs = F.relu(stage1_out)
+        elif self.use_sigmoid:
+            attr_outputs = F.sigmoid(stage1_out)
+        else:
+            attr_outputs = stage1_out
+
+        all_out = [self.sec_model(attr_outputs)]
+        all_out.extend(stage1_out)
+        return all_out
+
+    def forward(self, x):
+        if self.first_model.training:
+            similarity_scores, attention_maps, aux_outputs = self.first_model(x)
+
+            return (
+                self.forward_stage2(similarity_scores),
+                similarity_scores,
+                attention_maps,
+                self.forward_stage2(aux_outputs),
+            )
+        else:
+            similarity_scores, attention_maps = self.first_model(x)
+            return (
+                self.forward_stage2(similarity_scores),
+                similarity_scores,
+                attention_maps,
+            )
+
+class End2EndModel(torch.nn.Module):
+    def __init__(
+        self, model1, model2, use_relu=False, use_sigmoid=False, n_class_attr=2
+    ):
+        super(End2EndModel, self).__init__()
+        self.first_model = model1
+        self.sec_model = model2
+        self.use_relu = use_relu
+        self.use_sigmoid = use_sigmoid
+        self.protomod = model1.protomod
+
+    def forward_stage2(self, stage1_out):
+        if self.use_relu:
+            attr_outputs = F.relu(stage1_out)
+        elif self.use_sigmoid:
+            attr_outputs = F.sigmoid(stage1_out)
+        else:
+            attr_outputs = stage1_out
+
+        all_out = [self.sec_model(attr_outputs)]
+        all_out.extend(stage1_out)
+        return all_out
+
+    def forward(self, x):
+        if self.first_model.training:
+            similarity_scores, attention_maps, aux_outputs = self.first_model(x)
+
+            return (
+                self.forward_stage2(similarity_scores),
+                similarity_scores,
+                attention_maps,
+                self.forward_stage2(aux_outputs),
+            )
+        else:
+            similarity_scores, attention_maps = self.first_model(x)
+            return (
+                self.forward_stage2(similarity_scores),
+                similarity_scores,
+                attention_maps,
+            )
+
 
 class MLP(nn.Module):
     def __init__(self, input_dim, num_classes, expand_dim):
@@ -140,10 +225,14 @@ class MLP(nn.Module):
             self.linear2 = nn.Linear(
                 expand_dim, num_classes
             )  # softmax is automatically handled by loss function
+            self.linear2 = nn.Linear(
+                expand_dim, num_classes
+            )  # softmax is automatically handled by loss function
         self.linear = nn.Linear(input_dim, num_classes)
 
     def forward(self, x):
         x = self.linear(x)
+        if hasattr(self, "expand_dim") and self.expand_dim:
         if hasattr(self, "expand_dim") and self.expand_dim:
             x = self.activation(x)
             x = self.linear2(x)
@@ -166,15 +255,23 @@ def inception_v3(pretrained, freeze, **kwargs):
     if pretrained:
         if "transform_input" not in kwargs:
             kwargs["transform_input"] = True
+        if "transform_input" not in kwargs:
+            kwargs["transform_input"] = True
         model = Inception3(**kwargs)
+        if os.path.exists(model_urls.get("downloaded")):
+            model.load_partial_state_dict(torch.load(model_urls["downloaded"]))
         if os.path.exists(model_urls.get("downloaded")):
             model.load_partial_state_dict(torch.load(model_urls["downloaded"]))
         else:
             model.load_partial_state_dict(
                 model_zoo.load_url(model_urls["inception_v3_google"])
             )
+            model.load_partial_state_dict(
+                model_zoo.load_url(model_urls["inception_v3_google"])
+            )
         if freeze:  # only finetune fc layer
             for name, param in model.named_parameters():
+                if "fc" not in name:  # and 'Mixed_7c' not in name:
                 if "fc" not in name:  # and 'Mixed_7c' not in name:
                     param.requires_grad = False
         return model
@@ -369,6 +466,17 @@ class Inception3(nn.Module):
         three_class=False,
         connect_CY=False,
     ):
+    def __init__(
+        self,
+        num_classes,
+        aux_logits=True,
+        transform_input=False,
+        n_attributes=0,
+        bottleneck=False,
+        expand_dim=0,
+        three_class=False,
+        connect_CY=False,
+    ):
         """
         Args:
         num_classes: number of main task classes
@@ -397,6 +505,7 @@ class Inception3(nn.Module):
         self.Mixed_6c = InceptionC(768, channels_7x7=160)
         self.Mixed_6d = InceptionC(768, channels_7x7=160)
         self.Mixed_6e = InceptionC(768, channels_7x7=192)
+
         if aux_logits:
             self.AuxLogits = InceptionAux(
                 768,
@@ -409,7 +518,7 @@ class Inception3(nn.Module):
             )
         self.Mixed_7a = InceptionD(768)
         self.Mixed_7b = InceptionE(1280)
-        self.Mixed_7c = InceptionE(2048)
+        self.Mixed_7c = InceptionE(final_channels)
 
         self.all_fc = nn.ModuleList()  # separate fc layer for each prediction task. If main task is involved, it's always the first fc in the list
 
@@ -429,6 +538,8 @@ class Inception3(nn.Module):
         for m in self.modules():
             if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
                 import scipy.stats as stats
+
+                stddev = m.stddev if hasattr(m, "stddev") else 0.1
 
                 stddev = m.stddev if hasattr(m, "stddev") else 0.1
                 X = stats.truncnorm(-2, 2, scale=stddev)
@@ -460,50 +571,30 @@ class Inception3(nn.Module):
         # N x 80 x 73 x 73
         x = self.Conv2d_4a_3x3(x)
         # N x 192 x 71 x 71
-        x = F.max_pool2d(x, kernel_size=3, stride=2)
-        # N x 192 x 35 x 35
-        x = self.Mixed_5b(x)
-        # N x 256 x 35 x 35
-        x = self.Mixed_5c(x)
-        # N x 288 x 35 x 35
-        x = self.Mixed_5d(x)
-        # N x 288 x 35 x 35
-        x = self.Mixed_6a(x)
-        # N x 768 x 17 x 17
-        x = self.Mixed_6b(x)
-        # N x 768 x 17 x 17
-        x = self.Mixed_6c(x)
-        # N x 768 x 17 x 17
-        x = self.Mixed_6d(x)
-        # N x 768 x 17 x 17
-        x = self.Mixed_6e(x)
-        # N x 768 x 17 x 17
+        x = F.max_pool2d(x, kernel_size=3, stride=2)  # N x 192 x 35 x 35
+        x = self.Mixed_5b(x)  # N x 256 x 35 x 35
+        x = self.Mixed_5c(x)  # N x 288 x 35 x 35
+        x = self.Mixed_5d(x)  # N x 288 x 35 x 35
+        x = self.Mixed_6a(x)  # N x 768 x 17 x 17
+        x = self.Mixed_6b(x)  # -> N x 768 x 17 x 17
+        x = self.Mixed_6c(x)  # -> N x 768 x 17 x 17
+        x = self.Mixed_6d(x)  # -> N x 768 x 17 x 17
+        x = self.Mixed_6e(x)  # -> N x 768 x 17 x 17
+
         if self.training and self.aux_logits:
             out_aux = self.AuxLogits(x)
         # N x 768 x 17 x 17
-        x = self.Mixed_7a(x)
-        # N x 1280 x 8 x 8
-        x = self.Mixed_7b(x)
-        # N x 2048 x 8 x 8
-        x = self.Mixed_7c(x)
-        # N x 2048 x 8 x 8
-        # Adaptive average pooling
-        x = F.adaptive_avg_pool2d(x, (1, 1))
-        # N x 2048 x 1 x 1
-        x = F.dropout(x, training=self.training)
-        # N x 2048 x 1 x 1
-        x = x.view(x.size(0), -1)
-        # N x 2048
-        out = []
-        for fc in self.all_fc:
-            out.append(fc(x))
-        if self.n_attributes > 0 and not self.bottleneck and self.cy_fc is not None:
-            attr_preds = torch.cat(out[1:], dim=1)
-            out[0] += self.cy_fc(attr_preds)
+        x = self.Mixed_7a(x)  # N x 1280 x 8 x 8
+        x = self.Mixed_7b(x)  # N x 2048 x 8 x 8
+        x = self.Mixed_7c(x)  # N x 2048 x 8 x 8
+
+        # ---- APN INTEGRATION ----
+        similarity_scores, attention_maps = self.protomod(x)
+
         if self.training and self.aux_logits:
-            return out, out_aux
+            return similarity_scores, attention_maps, out_aux
         else:
-            return out
+            return similarity_scores, attention_maps
 
     def load_partial_state_dict(self, state_dict):
         """
@@ -511,6 +602,7 @@ class Inception3(nn.Module):
         """
         own_state = self.state_dict()
         for name, param in state_dict.items():
+            if name not in own_state or "fc" in name:
             if name not in own_state or "fc" in name:
                 continue
             if isinstance(param, Parameter):
@@ -777,6 +869,16 @@ class InceptionAux(nn.Module):
         three_class=False,
         connect_CY=False,
     ):
+    def __init__(
+        self,
+        in_channels,
+        num_classes,
+        n_attributes=0,
+        bottleneck=False,
+        expand_dim=0,
+        three_class=False,
+        connect_CY=False,
+    ):
         super(InceptionAux, self).__init__()
         self.conv0 = BasicConv2d(in_channels, 128, kernel_size=1)
         self.conv1 = BasicConv2d(128, 768, kernel_size=5)
@@ -794,6 +896,7 @@ class InceptionAux(nn.Module):
 
         if n_attributes > 0:
             if not bottleneck:  # cotraining
+            if not bottleneck:  # cotraining
                 self.all_fc.append(FC(768, num_classes, expand_dim, stddev=0.001))
             for i in range(self.n_attributes):
                 self.all_fc.append(FC(768, 1, expand_dim, stddev=0.001))
@@ -801,25 +904,33 @@ class InceptionAux(nn.Module):
             self.all_fc.append(FC(768, num_classes, expand_dim, stddev=0.001))
 
     def forward(self, x):
-        # N x 768 x 17 x 17
-        x = F.avg_pool2d(x, kernel_size=5, stride=3)
-        # N x 768 x 5 x 5
-        x = self.conv0(x)
-        # N x 128 x 5 x 5
-        x = self.conv1(x)
-        # N x 768 x 1 x 1
+        # input: N x 768 x 17 x 17
+        x = F.avg_pool2d(  # N x 768 x 5 x 5
+            x, kernel_size=5, stride=3
+        )
+        x = self.conv0(x)  # N x 128 x 5 x 5
+        x = self.conv1(x)  # N x 768 x 1 x 1
         # Adaptive average pooling
-        x = F.adaptive_avg_pool2d(x, (1, 1))
-        # N x 768 x 1 x 1
-        x = x.view(x.size(0), -1)
-        # N x 768
+        x = F.adaptive_avg_pool2d(x, (1, 1))  # N x 768 x 1 x 1
+        x = x.view(x.size(0), -1)  # N x 768
+
+        # todo: pre-allocate the output list and fill in for loop
+        # batch_size = x.size(0)
+        # total_out_dim = sum(
+        #     1 if i > 0 else self.all_fc[0].fc.out_features
+        #     for i in range(len(self.all_fc))
+        # )
+        # out = torch.empty(batch_size, total_out_dim, device=x.device, dtype=x.dtype)
+
         out = []
         for fc in self.all_fc:
             out.append(fc(x))
+
         if self.n_attributes > 0 and not self.bottleneck and self.cy_fc is not None:
             attr_preds = torch.cat(out[1:], dim=1)
             out[0] += self.cy_fc(attr_preds)
-        return out
+
+        return torch.cat(out, dim=1)
 
 
 class BasicConv2d(nn.Module):
@@ -832,3 +943,4 @@ class BasicConv2d(nn.Module):
         x = self.conv(x)
         x = self.bn(x)
         return F.relu(x, inplace=True)
+
