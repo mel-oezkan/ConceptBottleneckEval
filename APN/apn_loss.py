@@ -1,22 +1,25 @@
-from typing import Dict
-import torch
-from torch import nn, zeros_like
-import torch.nn.functional as F
+from argparse import Namespace
 
-from APN.apn_consts import CUB_SELECTED_ATTRIBUTES_PER_GROUP, CUB_GROUPS
+import torch
+import torch.nn.functional as F
+from torch import nn, zeros_like
+
+from APN.apn_consts import CUB_GROUPS, CUB_SELECTED_ATTRIBUTES_PER_GROUP
 from APN.apn_utils import add_glasso, get_middle_graph
 from APN.protomod import ProtoMod
 
 
 class ProtoModLoss(nn.Module):
-    def __init__(
-        self, protomod: ProtoMod, reg_weights: Dict[str, float], use_groups: bool
-    ):
+    def __init__(self, protomod: ProtoMod, args: Namespace):
         super(ProtoModLoss, self).__init__()
 
         self.protomod = protomod
-        self.reg_weights = reg_weights
-        self.use_groups = use_groups
+        self.reg_weights = {
+            "attribute_reg": args.proto_weight_attribute_reg,
+            "cpt": args.proto_weight_cpt,
+            "decorrelation": args.proto_weight_decorrelation,
+        }
+        self.use_groups = args.proto_use_groups
 
         self.middle_graph = get_middle_graph(protomod.kernel_size)
 
@@ -25,7 +28,7 @@ class ProtoModLoss(nn.Module):
         self.attributes_per_group = CUB_SELECTED_ATTRIBUTES_PER_GROUP
 
         # Precompute group attribute indices as tensors for faster indexing
-        if use_groups:
+        if self.use_groups:
             self.group_attr_indices = [
                 torch.tensor(self.attributes_per_group[group], dtype=torch.long)
                 for group in self.groups[:-1]
@@ -58,7 +61,9 @@ class ProtoModLoss(nn.Module):
         loss += cpt_loss
 
         num_vectors = self.protomod.prototype_vectors.shape[0] // num_attributes
-        prototypes = self.protomod.prototype_vectors.squeeze().reshape(num_attributes, num_vectors, -1) # [num_attributes, num_vectors, channel_dim]
+        prototypes = self.protomod.prototype_vectors.squeeze().reshape(
+            num_attributes, num_vectors, -1
+        )  # [num_attributes, num_vectors, channel_dim]
         if self.use_groups:
             # L_AD in the APN paper: Attribute decorrelation loss
             decorrelation_loss = zeros_like(cpt_loss)
@@ -73,4 +78,9 @@ class ProtoModLoss(nn.Module):
             decorrelation_loss = self.reg_weights["decorrelation"] * prototypes.norm(2)
             loss += decorrelation_loss
 
-        return loss, attribute_reg_loss.item(), cpt_loss.item(), decorrelation_loss.item()
+        return (
+            loss,
+            attribute_reg_loss.item(),
+            cpt_loss.item(),
+            decorrelation_loss.item(),
+        )

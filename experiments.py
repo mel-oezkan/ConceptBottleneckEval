@@ -16,39 +16,39 @@ from CUB.train import (
     hyperparameter_optimization,
 )
 
-def run_experiments(dataset, args):
+def run_experiments(args):
     experiment = args.exp
 
     if experiment == "Concept_XtoC":
-        train_X_to_C(args)
+        return train_X_to_C(args)
 
     elif experiment == "APN":
-        train_X_to_Proto_to_Y(args)
+        return train_X_to_Proto_to_Y(args)
 
     elif experiment == "Independent_CtoY":
-        train_oracle_C_to_y_and_test_on_Chat(args)
+        return train_oracle_C_to_y_and_test_on_Chat(args)
 
     elif experiment == "Sequential_CtoY":
-        train_Chat_to_y_and_test_on_Chat(args)
+        return train_Chat_to_y_and_test_on_Chat(args)
 
     elif experiment == "Joint":
-        train_X_to_C_to_y(args)
+        return train_X_to_C_to_y(args)
 
     elif experiment == "Standard":
-        train_X_to_y(args)
+        return train_X_to_y(args)
 
     # todo
     # elif experiment == "StandardWithAuxC":
     #     train_X_to_y_with_aux_C(args)
 
     elif experiment == "Multitask":
-        train_X_to_Cy(args)
+        return train_X_to_Cy(args)
 
     elif experiment == "Probe":
-        train_probe(args)
+        return train_probe(args)
 
     elif experiment == "TTI":
-        test_time_intervention(args)
+        return test_time_intervention(args)
 
     elif experiment == "Robustness":
         robustness(args)
