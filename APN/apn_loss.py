@@ -3,7 +3,8 @@ import torch
 from torch import nn, zeros_like
 import torch.nn.functional as F
 
-from APN.apn_consts import CUB_SELECTED_ATTRIBUTES_PER_GROUP, CUB_GROUPS
+from APN.apn_consts import MAP_PART_SEG_GROUPS_TO_CUB_ATTRIBUTE_IDS, PART_SEG_GROUPS
+from APN.index_translation_util import map_attribute_ids_from_cub_to_cbm
 from APN.apn_utils import add_glasso, get_middle_graph
 from APN.protomod import ProtoMod
 
@@ -21,13 +22,13 @@ class ProtoModLoss(nn.Module):
         self.middle_graph = get_middle_graph(protomod.kernel_size)
 
         # To calculate regularization among groups
-        self.groups = CUB_GROUPS
-        self.attributes_per_group = CUB_SELECTED_ATTRIBUTES_PER_GROUP
+        self.groups = PART_SEG_GROUPS
+        self.attributes_per_group = MAP_PART_SEG_GROUPS_TO_CUB_ATTRIBUTE_IDS
 
         # Precompute group attribute indices as tensors for faster indexing
         if use_groups:
             self.group_attr_indices = [
-                torch.tensor(self.attributes_per_group[group], dtype=torch.long)
+                torch.tensor(map_attribute_ids_from_cub_to_cbm(self.attributes_per_group[group]), dtype=torch.long)
                 for group in self.groups[:-1]
             ]
 

@@ -1,19 +1,12 @@
 import torch
 import os
 
-from APN.apn_consts import CUB_ATTRIBUTES_PER_GROUP, CUB_SELECTED_ATTRIBUTES, CUB_GROUPS_TO_PART_SEG, PART_SEG_GROUPS
+from APN.apn_consts import MAP_APN_GROUPS_TO_CUB_ATTRIBUTE_IDS, CBM_SELECTED_CUB_ATTRIBUTE_IDS, MAP_PART_SEG_GROUPS_TO_CUB_ATTRIBUTE_IDS, PART_SEG_GROUPS
 
 
 # Build a mapping from old index -> new index
-old_to_new = {old_idx: new_idx for new_idx, old_idx in enumerate(CUB_SELECTED_ATTRIBUTES)}
-
-# Translate each group's indices into new ones (keeping only those present in the subset)
-CUB_SELECTED_ATTRIBUTES_PER_GROUP = {
-    group: [old_to_new[i] for i in indices if i in old_to_new]
-    for group, indices in CUB_ATTRIBUTES_PER_GROUP.items()
-}
-
-# print(CUB_SELECTED_ATTRIBUTES_PER_GROUP)
+def map_attribute_ids_from_cub_to_cbm(absolute_indices: list):
+    return [relative_index for relative_index, absolute_index in enumerate(CBM_SELECTED_CUB_ATTRIBUTE_IDS) if absolute_index in absolute_indices]
 
 
 def map_attribute_ids_to_part_seg_group_id(batch_size, verbose=True):
@@ -25,24 +18,24 @@ def map_attribute_ids_to_part_seg_group_id(batch_size, verbose=True):
     # Build a lookup dict from the attributes IDs to the part seg group ID {attribute_index: group_id}
     attr_to_group = {}
     for group_id, group_name in enumerate(PART_SEG_GROUPS):
-        for idx in CUB_GROUPS_TO_PART_SEG[group_name]:
+        for idx in MAP_PART_SEG_GROUPS_TO_CUB_ATTRIBUTE_IDS[group_name]:
             if verbose and idx in attr_to_group:
                 print(f"Attribute ID {idx} is assigned to multiple groups: Old group = {attr_to_group[idx]}, New group = {group_id}")
             attr_to_group[idx] = group_id
 
-    # Create lookup tensor from it: For an attribute idx, map to its actual attribute ID, and use it for the lookuü
-    lookup = torch.empty(len(CUB_SELECTED_ATTRIBUTES), dtype=torch.long)
+    # Create lookup tensor from it: For an attribute idx, map to its actual attribute ID, and use it for the lookup
+    lookup = torch.empty(len(CBM_SELECTED_CUB_ATTRIBUTE_IDS), dtype=torch.long)
     unmatched_indices = []
-    for attr_idx in range(len(CUB_SELECTED_ATTRIBUTES)):
+    for attr_idx in range(len(CBM_SELECTED_CUB_ATTRIBUTE_IDS)):
 
         # This happens because of the "other" group, fill with dummy value, remove in main script from attention map!
-        if CUB_SELECTED_ATTRIBUTES[attr_idx] not in attr_to_group.keys():
+        if CBM_SELECTED_CUB_ATTRIBUTE_IDS[attr_idx] not in attr_to_group.keys():
             if verbose:
-                print(f"Attribute with ID {CUB_SELECTED_ATTRIBUTES[attr_idx]} could not be matched to any part segmentation group.")
+                print(f"Attribute with ID {CBM_SELECTED_CUB_ATTRIBUTE_IDS[attr_idx]} could not be matched to any part segmentation group.")
             unmatched_indices.append(attr_idx)
             continue
 
-        lookup[attr_idx] = attr_to_group[CUB_SELECTED_ATTRIBUTES[attr_idx]]
+        lookup[attr_idx] = attr_to_group[CBM_SELECTED_CUB_ATTRIBUTE_IDS[attr_idx]]
 
     # Remove unmatched attributes: Create mask stating which entries should be thrown out
     mask = torch.ones(lookup.size(0), dtype=torch.bool)
@@ -64,10 +57,11 @@ def get_attribute_names(path_to_cub_data, used_attributes_only=True):
                 continue
 
             # Skip this attribute if unused and the flag is set
-            if used_attributes_only and idx not in CUB_SELECTED_ATTRIBUTES:
+            if used_attributes_only and idx not in CBM_SELECTED_CUB_ATTRIBUTE_IDS:
                 continue
 
             _, attr_name = line.split(" ", 1)
             attribute_names.append(attr_name)
 
     return attribute_names
+
