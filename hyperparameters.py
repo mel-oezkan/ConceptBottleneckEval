@@ -2,7 +2,7 @@ import optuna
 
 from CUB.train import parse_arguments, train_X_to_Proto_to_Y
 
-BASE_ARGS = ["--seed", "1", "-ckpt", "1" , "-e" ,"300", "-optimizer", "sgd", "-pretrained", "-use_aux" ,"-use_attr", "-weighted_loss", "multiple", "-data_dir", "../data/CUB_processed/class_attr_data_10", "-n_attributes", "312",  "-attr_loss_weight", "1", "-normalize_loss", "-b", "64", "-end2end"]
+BASE_ARGS = ["--seed", "1", "-ckpt", "1" , "-e" ,"300", "-optimizer", "sgd", "-pretrained", "-use_aux" ,"-use_attr", "-weighted_loss", "multiple", "-data_dir", "../data/CUB_processed/class_attr_data_10", "-n_attributes", "112",  "-attr_loss_weight", "1", "-normalize_loss", "-b", "64", "-end2end"]
              
 
 def objective(trial: optuna.Trial):
@@ -10,11 +10,11 @@ def objective(trial: optuna.Trial):
     args = parse_arguments("Joint", BASE_ARGS)
 
     # General arguments to optimize
-    args.lr = trial.suggest_categorical("lr", [0.01, 0.001, 0.0001])  # type: ignore
-    args.scheduler_step = trial.suggest_categorical( # type: ignore
-        "scheduler_step", [10, 15, 20, 1000]
-    )
-    args.weight_decay = trial.suggest_categorical("weight_decay", [0.0004, 0.00004])  # type: ignore
+    # args.lr = trial.suggest_categorical("lr", [0.01, 0.001, 0.0001])  # type: ignore
+    # args.scheduler_step = trial.suggest_categorical( # type: ignore
+    #     "scheduler_step", [10, 15, 20, 1000]
+    # )
+    # args.weight_decay = trial.suggest_categorical("weight_decay", [0.0004, 0.00004])  # type: ignore
 
     # ProtoMod specific properties
     args.proto_n_vectors = trial.suggest_int("proto_n_vectors", 1, 10)  # type: ignore
