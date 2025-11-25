@@ -54,9 +54,14 @@ class CUBDataset(Dataset):
             if self.image_dir != 'images':
                 img_path = '/'.join([self.image_dir] + img_path.split('/')[idx+1:])
                 img_path = img_path.replace('images/', '')
+                if "images" in self.image_dir:
+                    img_path = '/'.join([self.image_dir] + img_path.split('/')[idx+2:])
+                else:
+                    img_path = '/'.join([self.image_dir] + img_path.split('/')[idx+1:])
+                    img_path = img_path.replace('images/', '')
             else:
                 img_path = '/'.join(img_path.split('/')[idx:])
-            img = Image.open("data/" + img_path).convert('RGB')
+            img = Image.open(img_path).convert('RGB')
         except:
             img_path_split = img_path.split('/')
             split = 'train' if self.is_train else 'test'

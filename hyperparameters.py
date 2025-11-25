@@ -4,9 +4,9 @@ from CUB.train import parse_arguments, train_X_to_Proto_to_Y
 
 BASE_ARGS = [
     "cub", "Joint", "--seed", "1", "-ckpt", "1" , "-e" ,"300", "-optimizer", "sgd", "-pretrained",
-    "-use_aux" ,"-use_attr", "-weighted_loss", "multiple", "-image_dir", "data/CUB_200_2011/images",
-    "-data_dir", "data/CUB_processed/class_attr_data_10", "-n_attributes", "112",  "-attr_loss_weight", "1",
-    "-normalize_loss", "-b", "64", "-end2end", "-log_dir" ,"outputs/OPTUNA",
+    "-use_aux" ,"-use_attr", "-weighted_loss", "multiple", "-image_dir", "./data/CUB_200_2011/images",
+    "-data_dir", "./data/CUB_processed/class_attr_data_10", "-n_attributes", "112",  "-attr_loss_weight", "1",
+    "-normalize_loss", "-b", "64", "-end2end", "-log_dir" ,"./outputs/OPTUNA",
     "-weight_decay", "0.00004", "-lr", "0.01", "-scheduler_step", "1000" \
 ]
              

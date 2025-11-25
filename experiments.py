@@ -16,7 +16,7 @@ from CUB.train import (
     hyperparameter_optimization,
 )
 
-def run_experiments(args):
+def run_experiments(dataset, args):
     experiment = args.exp
 
     if experiment == "Concept_XtoC":

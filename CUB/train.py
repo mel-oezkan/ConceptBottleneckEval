@@ -247,7 +247,6 @@ def run_epoch(
             if args.n_attributes > 1:
                 # attributes
                 attr_labels = torch.stack(attr_labels, dim=1).float()
-                print("attr_labels shape:", attr_labels.shape)
             else:
                 if isinstance(attr_labels, list):
                     attr_labels = attr_labels[0]
@@ -523,8 +522,9 @@ def train(model, args):
                 else:
                     if model.__class__.__name__ == "ProtoEnd2End":
                         protomod_criterion = ProtoModLoss(
-                            model.protomod, reg_weights, use_groups
+                            model.protomod, args
                         )
+                        print("Running protomod")
 
                         train_loss_meter, train_acc_meter = run_epoch_proto(
                             model,
