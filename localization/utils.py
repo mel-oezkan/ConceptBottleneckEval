@@ -1,7 +1,7 @@
 #code from the APN github: https://github.com/wenjiaXu/APN-ZSL/blob/master/model/main_utils.py#L295
 import numpy as np
 import os
-import cv2
+
 
 
 
@@ -23,7 +23,7 @@ def get_KP_BB(gt_point, mask_h, mask_w, bird_BB, KNOW_BIRD_BB=False):
         KP_y1, KP_y2 = Bound[1], Bound[1] + mask_h
     elif KP_y2 > Bound[3]:
         KP_y1, KP_y2 = Bound[3] - mask_h, Bound[3]
-    return {'x1': KP_x1, 'x2': KP_x2, 'y1': KP_y1, 'y2': KP_y2}
+    return [KP_x1, KP_y1, KP_x2, KP_y2]#{'x1': KP_x1, 'x2': KP_x2, 'y1': KP_y1, 'y2': KP_y2}
 
 
 
