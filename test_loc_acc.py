@@ -1,11 +1,20 @@
-#test run of loc accuracy
-print("starting script")
+""" Evaluation script for the localization accuracy on CUB dataset.
+
+Example usage:
+python test_loc_acc.py \
+    --model_path /path/to/model.pth \
+    --data_root /path/to/CUB_processed/class_attr_data_10 \
+    --cub_root /path/to/CUB_200_2011
+    --cub_img_path /path/to/CUB_200_2011/images
+"""
 import argparse
-from localization.eval import test_CUB_IoU
-from CUB.dataset import CUBDataset
 
 import torch
 from torchvision import transforms
+
+from CUB.dataset import CUBDataset
+from localization.eval import test_CUB_IoU
+
 print("imports done")
 
 MAP_PART_SEG_GROUPS_TO_CUB_GROUPS = {
@@ -54,63 +63,86 @@ MAP_CUB_PARTS_GROUPS_TO_CUB_ATTRIBUTE_IDS = {
 }
 
 
+
 def map_attribute_ids_from_cub_to_cbm(absolute_indices: list):
-    return [relative_index for relative_index, absolute_index in enumerate(CBM_SELECTED_CUB_ATTRIBUTE_IDS) if absolute_index in absolute_indices]
+    return [
+        relative_index
+        for relative_index, absolute_index in enumerate(CBM_SELECTED_CUB_ATTRIBUTE_IDS)
+        if absolute_index in absolute_indices
+    ]
 
 
-MAP_CUB_PARTS_GROUPS_TO_CUB_ATTRIBUTE_IDS = {part: map_attribute_ids_from_cub_to_cbm(attr_ids) for part, attr_ids in MAP_CUB_PARTS_GROUPS_TO_CUB_ATTRIBUTE_IDS.items()}
+MAP_CUB_PARTS_GROUPS_TO_CUB_ATTRIBUTE_IDS = {
+    part: map_attribute_ids_from_cub_to_cbm(attr_ids)
+    for part, attr_ids in MAP_CUB_PARTS_GROUPS_TO_CUB_ATTRIBUTE_IDS.items()
+}
 
-#print(MAP_CUB_PARTS_GROUPS_TO_CUB_ATTRIBUTE_IDS)
+# print(MAP_CUB_PARTS_GROUPS_TO_CUB_ATTRIBUTE_IDS)
+
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Test localization accuracy on CUB dataset')
-    parser.add_argument('--model_path', type=str, required=True, help='Path to the model checkpoint')
-    parser.add_argument('--data_root', type=str, required=True, help='Path to the processed CUB data (class_attr_data_10)')
-    parser.add_argument('--cub_root', type=str, required=True, help='Path to CUB_200_2011 dataset root')
-    parser.add_argument('--resol', type=int, default=299, help='Image resolution')
-    parser.add_argument('--iou_thr', type=float, default=0.5, help='IoU threshold')
+    parser = argparse.ArgumentParser(
+        description="Test localization accuracy on CUB dataset"
+    )
+    parser.add_argument(
+        "--model_path", type=str, required=True, help="Path to the model checkpoint"
+    )
+    parser.add_argument(
+        "--data_root",
+        type=str,
+        required=True,
+        help="Path to the processed CUB data (class_attr_data_10)",
+    )
+    parser.add_argument(
+        "--cub_root", type=str, required=True, help="Path to CUB_200_2011 dataset root"
+    )
+    parser.add_argument(
+        "--cub_img_path", type=str, required=True, help="Path to CUB_200_2011 images"
+    )
+    parser.add_argument("--resol", type=int, default=299, help="Image resolution")
+    parser.add_argument("--iou_thr", type=float, default=0.5, help="IoU threshold")
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    
+
     print("Starting script")
     print("Setting up transforms")
-    
+
     resol = args.resol
-    transform = transforms.Compose([
-        transforms.CenterCrop(resol),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[2, 2, 2])
-    ])
-    
+    transform = transforms.Compose(
+        [
+            transforms.CenterCrop(resol),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[2, 2, 2]),
+        ]
+    )
+
     print("Loading dataset")
     pkl_paths = [f"{args.data_root}/test.pkl"]
     cub_test_dataset = CUBDataset(
-        pkl_paths, 
-        use_attr=False, 
+        pkl_paths,
+        use_attr=False,
         uncertain_label=False,
         no_img=False,
-        image_dir="images",
+        image_dir=args.cub_img_path,
         n_class_attr=2,
-        transform=transform
+        transform=transform,
     )
 
     print("Loading model")
-    model = torch.load(args.model_path)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = torch.load(args.model_path, weights_only=False, map_location=device)
 
     print("Calling eval function")
     body_avg_IoU, mean_IoU = test_CUB_IoU(
-        args={
-            "cuda": torch.cuda.is_available(),
-            "IoU_thr": args.iou_thr
-        }, 
-        model=model, 
+        args={"cuda": torch.cuda.is_available(), "IoU_thr": args.iou_thr},
+        model=model,
         dataset=cub_test_dataset,
         CUB_root=args.cub_root,
         part_attribute_mapping=MAP_CUB_PARTS_GROUPS_TO_CUB_ATTRIBUTE_IDS,
-        subgroup_mapping=MAP_PART_SEG_GROUPS_TO_CUB_GROUPS
+        subgroup_mapping=MAP_PART_SEG_GROUPS_TO_CUB_GROUPS,
     )
 
     print(f"Body Average IoU: {body_avg_IoU}")
