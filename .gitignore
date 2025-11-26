@@ -4,10 +4,14 @@
 .ipynb_checkpoints/
 *pyc
 .idea/
+data/
 .vscode/
 data/
 outputs
 models
 CUB_200_2011/
 CUB/pretrained
-/pretrained
+uv.lock
+pyproject.toml
+*/__pycache__
+__pycache__

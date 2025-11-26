@@ -7,7 +7,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import pearsonr, spearmanr
 from sklearn.metrics import mean_squared_error, precision_recall_fscore_support, accuracy_score, precision_score, recall_score, balanced_accuracy_score, classification_report
-import torch
 
 
 # ---------------------- OAI ----------------------
@@ -315,9 +314,9 @@ def accuracy(output, target, topk=(1,)):
     batch_size = target.size(0)
     _, pred = output.topk(maxk, 1, True, True)
     pred = pred.t()
+
     temp = target.view(1, -1).expand_as(pred)
-    temp = temp.to("cuda" if torch.cuda.is_available() else "cpu")
-    correct = pred.eq(temp)
+    correct = pred.eq(temp.to(output.device))
 
     res = []
     for k in topk:
