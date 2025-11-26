@@ -17,4 +17,5 @@ python experiments.py cub APN \
     -weight_decay 0.00004 \
     -lr 0.01 \
     -scheduler_step 1000 \
-    -end2end
+    -end2end \
+    -image_dir data/CUB_200_2011/images \
