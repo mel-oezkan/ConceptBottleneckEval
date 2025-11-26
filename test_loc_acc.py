@@ -1,5 +1,6 @@
 #test run of loc accuracy
 print("starting script")
+import argparse
 from localization.eval import test_CUB_IoU
 from CUB.dataset import CUBDataset
 
@@ -61,43 +62,60 @@ MAP_CUB_PARTS_GROUPS_TO_CUB_ATTRIBUTE_IDS = {part: map_attribute_ids_from_cub_to
 
 #print(MAP_CUB_PARTS_GROUPS_TO_CUB_ATTRIBUTE_IDS)
 
+def parse_args():
+    parser = argparse.ArgumentParser(description='Test localization accuracy on CUB dataset')
+    parser.add_argument('--model_path', type=str, required=True, help='Path to the model checkpoint')
+    parser.add_argument('--data_root', type=str, required=True, help='Path to the processed CUB data (class_attr_data_10)')
+    parser.add_argument('--cub_root', type=str, required=True, help='Path to CUB_200_2011 dataset root')
+    parser.add_argument('--resol', type=int, default=299, help='Image resolution')
+    parser.add_argument('--iou_thr', type=float, default=0.5, help='IoU threshold')
+    return parser.parse_args()
 
-print("setting vars")
-resol = 299
-resized_resol = int(resol * 256/224)
-transform = transforms.Compose([
-            #transforms.Resize((resized_resol, resized_resol)),
-            transforms.CenterCrop(resol),
-            transforms.ToTensor(), #implicitly divides by 255
-            transforms.Normalize(mean = [0.5, 0.5, 0.5], std = [2, 2, 2])
-            #transforms.Normalize(mean = [ 0.485, 0.456, 0.406 ], std = [ 0.229, 0.224, 0.225 ]),
-            ])
-print("done setup")
-model_path = "/home/ms66gide/ProtoCBM.pth"
-data_root = "/home/ms66gide/CUB_processed.tar/class_attr_data_10"
-pkl_paths = [data_root + "/test.pkl"]
-cub_test_dataset = CUBDataset(pkl_paths, 
-                            use_attr=False, 
-                            uncertain_label=False,
-                            no_img=False,
-                            image_dir="images",
-                            n_class_attr=2,
-                            transform = transform)
 
-print("loading model")
-model = torch.load(model_path)
-
-print("calling eval function")
-body_avg_IoU, mean_IoU = test_CUB_IoU(args={
-        "cuda": torch.cuda.is_available(),
-        "IoU_thr": 0.5
-    }, 
-    model=model, 
-    dataset=cub_test_dataset,
-    CUB_root="/home/ms66gide/CUB_200_2011",
-    part_attribute_mapping=MAP_CUB_PARTS_GROUPS_TO_CUB_ATTRIBUTE_IDS,
-    subgroup_mapping=MAP_PART_SEG_GROUPS_TO_CUB_GROUPS
+def main():
+    args = parse_args()
+    
+    print("Starting script")
+    print("Setting up transforms")
+    
+    resol = args.resol
+    transform = transforms.Compose([
+        transforms.CenterCrop(resol),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[2, 2, 2])
+    ])
+    
+    print("Loading dataset")
+    pkl_paths = [f"{args.data_root}/test.pkl"]
+    cub_test_dataset = CUBDataset(
+        pkl_paths, 
+        use_attr=False, 
+        uncertain_label=False,
+        no_img=False,
+        image_dir="images",
+        n_class_attr=2,
+        transform=transform
     )
 
-print(body_avg_IoU, mean_IoU)
+    print("Loading model")
+    model = torch.load(args.model_path)
 
+    print("Calling eval function")
+    body_avg_IoU, mean_IoU = test_CUB_IoU(
+        args={
+            "cuda": torch.cuda.is_available(),
+            "IoU_thr": args.iou_thr
+        }, 
+        model=model, 
+        dataset=cub_test_dataset,
+        CUB_root=args.cub_root,
+        part_attribute_mapping=MAP_CUB_PARTS_GROUPS_TO_CUB_ATTRIBUTE_IDS,
+        subgroup_mapping=MAP_PART_SEG_GROUPS_TO_CUB_GROUPS
+    )
+
+    print(f"Body Average IoU: {body_avg_IoU}")
+    print(f"Mean IoU: {mean_IoU}")
+
+
+if __name__ == "__main__":
+    main()
