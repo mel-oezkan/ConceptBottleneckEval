@@ -2,26 +2,55 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
+import cv2
 
-from utils import *
 from statistics import mean
 import os
 from CUB.dataset import CUBDataset
-from CUB.dataset_utils import get_CUB_paths
 
-from utils import get_KP_BB, get_iou
-from localization.utils import BirdBB
+from localization.utils import get_KP_BB, get_iou
 
 
-# rewrite of method because this sucks
-def test_CUB_IoU(args: dict, model, dataset: CUBDataset, CUB_root:str):
+
+MAP_CUB_PARTS_GROUPS_TO_CUB_ATTRIBUTE_IDS = {
+    'left eye': [100, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148],
+    'right eye': [100, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148],
+    'nape': [182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196],
+    'back': MAP_APN_GROUPS_TO_CUB_ATTRIBUTE_IDS['back'],
+    'belly': MAP_APN_GROUPS_TO_CUB_ATTRIBUTE_IDS['belly'],
+    'beak': [0, 1, 2, 3, 4, 5, 6, 7, 8, 149, 150, 151, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292], 
+    'breast': [54, 55, 56, 57, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119],
+    'throat': [120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 94, 95, 96, 97, 98, 99, 101, 102, 103, 104],
+    'crown': [293, 294, 295, 296, 297, 298, 299, 300, 301, 302, 303, 304, 305, 306, 307],
+    'forehead': [152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166],
+    'tail': MAP_APN_GROUPS_TO_CUB_ATTRIBUTE_IDS['tail'],
+    'left wing': MAP_APN_GROUPS_TO_CUB_ATTRIBUTE_IDS['wing'],
+    'right wing': MAP_APN_GROUPS_TO_CUB_ATTRIBUTE_IDS['wing'],
+    'left leg': MAP_APN_GROUPS_TO_CUB_ATTRIBUTE_IDS['leg'],
+    'right leg': MAP_APN_GROUPS_TO_CUB_ATTRIBUTE_IDS['leg'],
+}
+
+
+#TO-DO: CUB parts to Sebbis seg groups mapping einbauen
+def test_CUB_IoU(args:dict, model, dataset:CUBDataset, CUB_root:str, part_attribute_mapping:dict, subgroup_mapping:dict):
+    # part_attribute_mapping means a dict that maps from a part (CUB/parts/parts.txt) to a list of attribute IDs
+    # sum of all attribute IDs must not be more that number of attention maps returned/attributes used by model. also is
+    # required to be 0 indexed and correctly match the attribute order in the model
     #reimplementation of paper description
     
-    #save ious from images
+    #save ious from all images
     whole_IoU = []
 
     #get relevant paths to mappings
     imgID_imgName_mapping_path, parts_locs_path, parts_mapping_path, bird_BB_path = get_CUB_paths(CUB_root)
+
+    part_dict = {}
+    with open(parts_mapping_path) as ps:
+        for line in ps:
+            line = line.strip()
+            id, part_name = line.split(" ", maxsplit=1)
+            part_dict[int(id)] = part_name
+            
 
     #read here later into dictionary
     imgName_to_imgID = {}
@@ -42,7 +71,7 @@ def test_CUB_IoU(args: dict, model, dataset: CUBDataset, CUB_root:str):
                 continue
             id_str, *info = line.split()
             
-            info = [int(x) for x in info]
+            info = [float(x) for x in info]
 
             if int(id_str) not in img_id_to_part_locs:
                 img_id_to_part_locs[int(id_str)] = [info]
@@ -57,75 +86,137 @@ def test_CUB_IoU(args: dict, model, dataset: CUBDataset, CUB_root:str):
                 continue
             id_str, *bb_info = line.split()
 
-            bb_info = [int(x) for x in bb_info]
+            bb_info = [float(x) for x in bb_info]
             
             imgID_to_birdBB[int(id_str)] = bb_info
 
-
+    #start eval
 
     with torch.no_grad():
-        for i, (image, target, impath) in enumerate(dataset):
+        for i, (input, target, impath) in enumerate(dataset):
+            if i % 10 == 0:
+                print(f"Processing image {i}/{len(dataset)}")
+
             #for each image, first find relevant data
-            img_shape = image.shape
-
-            # get image id using image name from path
-            img_name = os.sep.join(impath.split(os.sep)[-2:]) # class path is also in mapping name
+            #image size to resize heatmaps
+            im_width, im_height = input.size()[-2:]
+            #get image id
+            img_name = os.sep.join(impath.split(os.sep)[-2:]) #class path is also in mapping name
             img_id = imgName_to_imgID[img_name]
-
-            # get the respective bbs
-            part_infos = img_id_to_part_locs[img_id]            
-            bird_bb = BirdBB(*imgID_to_birdBB[img_id]) 
-            #fun fact readme says it is x, y, width, height, but APN later wants x1, y1, x2, y2
-            
-            # per id parts
+            #get location and visibility infos of parts of image
+            part_infos = img_id_to_part_locs[img_id]
+            #get bird bb of image
+            bird_bb = imgID_to_birdBB[img_id] #fun fact readme says it is x, y, width, height, but APN later wants x1, y1, x2, y2
+            #for each part get the gt bounding box
             bounding_boxes_per_part = get_BB_per_part(bird_bb, part_infos)
 
-            if args.cuda:
-                image = image.cuda()
-            
-            output, pre_attri, attention, _ = model(image)
+            if args["cuda"]:
+                input = input.to("cuda")
 
+            input = input.unsqueeze(0)  #add batch dimension
+           
+            _, pre_attri, attention = model(input)
 
+            pre_attri = pre_attri.squeeze(0).cpu().numpy()  #remove batch dimension and move to cpu
+            attention = attention.squeeze(0).cpu().numpy()  #move to cpu
+   
             #get argmax attribute per part
-            argmax_per_part = None #max index per part, -1 if part not present
-            #take attention if given else empty
-            heatmaps = [attention[idx] if idx != -1 else [] for idx in argmax_per_part]
+            argmax_per_part = [] #max index per part, -1 if part not present
+            
+            for part in part_dict.values():
+                #take argmax of each part group
+                arg_max = max(part_attribute_mapping[part], key=lambda i: pre_attri[i])
+                argmax_per_part.append(arg_max)
+       
+            #take heatmap if given else empty
+            heatmaps = [attention[idx] if idx != -1 else np.ndarray([]) for idx in argmax_per_part]
 
             #upscale heatmaps, use cv2 like original code
-            heatmap = [cv2.resize(m, img_shape[-2:]) for m in heatmaps]
-
+            heatmaps = [cv2.resize(m, dsize=(im_width, im_height)) for m in heatmaps]
+         
+            #compute sliding window from heatmaps
             optimal_masks = [get_optimal_mask(heatmap, part_box) for heatmap, part_box in zip(heatmaps, bounding_boxes_per_part)]
-
+            #get iou per existing part, empty if none
             IoUs = [get_iou({"x1":op_mask[0], "y1":op_mask[1], "x2":op_mask[2], "y2":op_mask[3]}, {"x1":gt_mask[0], "y1":gt_mask[1], "x2":gt_mask[2], "y2":gt_mask[3]}) \
                     if op_mask != [] else -1 for op_mask, gt_mask in zip(optimal_masks, bounding_boxes_per_part)]
-
            
-            whole_IoU += IoUs
-
-    body_avg_IoU, mean_IoU = calculate_average_IoU(whole_IoU, IoU_thr=args.IoU_thr)
+            #take computed IoUs per part and store them to dict for later calculation
+            sub_res = {}
+            for part, iou in zip(list(part_dict.values()), IoUs):
+                sub_res[part] = iou
+           
+            whole_IoU.append(sub_res)
+            
+    #calculate avarages
+    body_avg_IoU, mean_IoU = calculate_average_partwise_acc(whole_IoU, subgroup_mapping, IoU_thr=args["IoU_thr"])
     return body_avg_IoU, mean_IoU
 
 
-def get_optimal_mask(heatmap, part_bb):
+def calculate_average_partwise_acc(all_ious:list[dict], subgroup_mapping:dict, IoU_thr: float=0.5):
+    #compute acc with ious and threshold for all images per part
+    #all ious = list with each item having a matching from part to iou
+
+    #preprocessing, merge groups that belong together and take the max iou value
+    processed_ious = []
+    for iou in all_ious:
+        new_part = {}
+        for part in subgroup_mapping.keys():
+            grouped_parts = subgroup_mapping[part]
+            max_iou = -1
+            for g_part in grouped_parts:
+                if g_part in iou.keys():
+                    if iou[g_part] > max_iou:
+                        max_iou = iou[g_part]
+            new_part[part] = max_iou
+        processed_ious.append(new_part)
+
+    #collect part ious over all images
+    collect = {}
+    for part in processed_ious[0].keys():
+        collect[part] = []
+
+    for iou in processed_ious:
+        for part, value in iou.items():
+            if value == -1: #this part was not present in the image, no iou
+                continue
+            collect[part].append(1 if value >= IoU_thr else 0)
+
+    #divide sum by amount
+    res = {}
+    for part, collected_ious in collect.items():
+        res[part] = sum(collected_ious)/len(collected_ious) if len(collected_ious) != 0 else -1
+
+    mean_iou = [x for x in res.values() if x != -1]
+    mean_iou_acc = sum(mean_iou)/len(mean_iou)
+
+    return res, mean_iou_acc
+
+    
+
+def get_optimal_mask(heatmap:np.ndarray, part_bb:list):
     #takes the heatmap and
-    if heatmap == [] or part_bb == []: #normally both should be empty but just in case make or
+    
+    if heatmap.size == 0 or len(part_bb) == 0: #normally both should be empty but just in case make or
         return []
     
-    mask_w = part_bb[2] - part_bb[0]
-    mask_h = part_bb[3] - part_bb[1]
+    #mask height and width
+    mask_w = int(part_bb[2] - part_bb[0])
+    mask_h = int(part_bb[3] - part_bb[1])
 
+    #conv for response map, take maximum value
     kernel = torch.ones((1, 1, mask_h, mask_w))
-    response = F.conv2d(heatmap, kernel)
-
-    max_pos = response.argmax()
-
-    best_y = (max_pos // response.shape[-1]).item()
-    best_x = (max_pos %  response.shape[-1]).item()
+    response = F.conv2d(torch.from_numpy(heatmap).unsqueeze(0).unsqueeze(0), kernel).squeeze(0).squeeze(0)
+    
+    #argmax from flatten, then convert back to 2d pos
+    flat_response = torch.flatten(response)
+    max_pos = flat_response.argmax()
+    best_y = (max_pos // heatmap.shape[-1]).item()
+    best_x = (max_pos %  heatmap.shape[-1]).item()
 
     #x1, y1, x2, y2
-    return [best_x - int(mask_w/2), best_y - int(mask_h/2), best_x + int(mask_w/2), best_y + int(mask_h/2)]
+    return [max(0, best_x - int(mask_w/2)), max(0, best_y - int(mask_h/2)), min(heatmap.shape[0], best_x + int(mask_w/2)), min(heatmap.shape[1], best_y + int(mask_h/2))]
 
-def get_BB_per_part(bird_bb: BirdBB, part_infos, scale=4):
+def get_BB_per_part(bird_bb, part_infos, scale=4):
     #generate a bounding box mask per part, empty if part is not visible
     #BB format returned is (x1, y1, x2, y2)
 
@@ -138,147 +229,30 @@ def get_BB_per_part(bird_bb: BirdBB, part_infos, scale=4):
     part_masks = []
     for info in part_infos:
         #info: part_id, x1, y1, visible
-        if info[-1] == 0: #part not visible, no gt
+        if info[-1] == 0.0: #part not visible, no gt
             part_masks.append([])
             continue
         gt = (info[1], info[2])
-
-        # change from x, y, w, h to x1, y1, x2, y2
-        transformed_bird_BB = bird_bb.get_bb()
+        #change from x, y, w, h to x1, y1, x2, y2
+        transformed_bird_BB = [bird_bb[0], bird_bb[1], bird_bb[0] + bird_bb[2], bird_bb[1] + bird_bb[3]]
         part_masks.append(get_KP_BB(gt, mask_h, mask_w, transformed_bird_BB))
 
     return part_masks
 
 
+def get_CUB_paths(CUB_root:str):
+    #get path to certain files starting from CUB root, assuming CUB structure
 
+    #maps image id to image name
+    imgID_imgName_mapping_path = os.path.join(CUB_root, "images.txt")
+    #information about parts bounding boxes and in-image occurence
+    parts_locs_path = os.path.join(CUB_root, "parts", "part_locs.txt") 
+    #maps part ID to part name
+    parts_mapping_path = os.path.join(CUB_root, "parts", "parts.txt")
+    #information about bird bounding boxes per image id
+    bird_BB_path = os.path.join(CUB_root, "bounding_boxes.txt")
 
-
-def test_with_IoU(opt, model, testloader, vis_groups=None, vis_root=None,
-                  required_num=2, save_att=False, sub_group_dic=None, group_dic=None):
-    """
-    save feature maps to visualize the activation
-    :param model: loaded model
-    :param testloader:
-    #:param attribute: test attributes (model input, no effect to activation maps here)
-    #:param test_classes: test classes (accuracy input, no effect to activation maps here)
-    :param vis_groups: the groups to be shown
-    :param vis_layer: the layers to be shown
-    :param vis_root: save path to activation maps
-    :param required_num: the number images shown in each categories
-    :return:
-    """
-    # print('Calculating the IoU of attention maps, saving attention map to:', save_att)
-    layer_name = 'layer4'
-    #GT_targets = []
-    #predicted_labels = []
-    vis_groups = group_dic
-
-    whole_IoU = []
-    # print("vis_groups:", vis_groups)
-    # required_num = 2  # requirement denotes the number for each categories
-    with torch.no_grad():
-        count = dict()
-        for i, (input, target, impath) in \
-                enumerate(testloader):
-            save_att_idx = []
-            labels = target.data.tolist()
-            for idx in range(len(labels)):
-                label = labels[idx]
-                if label in count:
-                    count[label] = count[label] + 1
-                else:
-                    count[label] = 1
-                if count[label] <= required_num:
-                    save_att_idx.append(1)
-                else:
-                    save_att_idx.append(0)
-
-            if opt.cuda:
-                input = input.cuda()
-                target = target.cuda()
-
-            output, pre_attri, attention, _ = model(input)#, attribute)
-            # pre_attri.shape : 64，112
-            # attention.shape : 64, 112, 8, 8
-            maps = {layer_name: attention['layer4'].cpu().numpy()}
-            pre_attri = pre_attri['layer4']
-            target_groups = [{} for _ in range(output.size(0))]  # calculate the target groups for each image
-            # target_groups is a list of size image_num
-            # each item is a dict, including the attention index for each subgroup
-            for part in vis_groups.keys():
-                sub_group = sub_group_dic[part]
-                keys = list(sub_group.keys())
-
-                # sub_activate_id is the attention id for each part in each image. The size is img_num * sub_group_num
-                sub_activate_id = []
-                for k in keys:
-                    sub_activate_id.append(torch.argmax(pre_attri[:, sub_group[k]], dim=1, keepdim=True))
-                sub_activate_id = torch.cat(sub_activate_id, dim=1).cpu().tolist()  # (batch_size, sub_group_dim)
-                for attention_id, argdims in enumerate(sub_activate_id):
-                    target_groups[attention_id][part] = [sub_group[keys[i]][argdim] for i, argdim in enumerate(argdims)]
-
-            KP_root = './data/vis/save_KPs/'
-            scale = opt.IoU_scale
-            batch_IoU = calculate_atten_IoU(input, impath, save_att_idx, maps, [layer_name], target_groups, KP_root,
-                                            save_att=save_att, scale=scale, resize_WH=opt.resize_WH,
-                                            KNOW_BIRD_BB=opt.KNOW_BIRD_BB)
-            # print('batch_IoU:', batch_IoU)
-            whole_IoU += batch_IoU
-            #_, predicted_label = torch.max(output.data, 1)
-            #predicted_labels.extend(predicted_label.cpu().numpy().tolist())
-            #GT_targets = GT_targets + target.data.tolist()
-            # break
-
-    body_avg_IoU, mean_IoU = calculate_average_IoU(whole_IoU, IoU_thr=opt.IoU_thr)
-    #GT_targets = np.asarray(GT_targets)
-    #acc_all, acc_avg = compute_per_class_acc(map_label(torch.from_numpy(GT_targets), test_classes).numpy(),
-    #                                 np.array(predicted_labels), test_classes.numpy())
-    return body_avg_IoU, mean_IoU
-
-
-
-def map_label(label, classes):
-    mapped_label = torch.LongTensor(len(label))
-    for i in range(classes.size(0)):
-        mapped_label[label==classes[i]] = i    
-    return mapped_label
-
-
-def compute_per_class_acc(test_label, predicted_label, nclass):
-    test_label = np.array(test_label)
-    predicted_label = np.array(predicted_label)
-    acc_per_class = []
-    acc = np.sum(test_label == predicted_label) / len(test_label)
-    for i in range(len(nclass)):
-        idx = (test_label == i)
-        acc_per_class.append(np.sum(test_label[idx] == predicted_label[idx]) / np.sum(idx))
-    return acc, sum(acc_per_class)/len(acc_per_class)
-
-
-
-def calculate_average_IoU(whole_IoU, IoU_thr=0.5):
-    img_num = len(whole_IoU)
-    body_parts = whole_IoU[0].keys()
-    body_avg_IoU = {}
-    for body_part in body_parts:
-        body_avg_IoU[body_part] = []
-        body_IoU = []
-        for im_id in range(img_num):
-            if len(whole_IoU[im_id][body_part]) > 0:
-                if_one = []
-                for item in whole_IoU[im_id][body_part]:
-                    if_one.append(1 if item > IoU_thr else 0)
-                body_IoU.append(mean(if_one))
-        body_avg_IoU[body_part].append(mean(body_IoU))
-    num = 0
-    sum = 0
-    for part in body_avg_IoU:
-        if part != 'tail':
-            sum += body_avg_IoU[part][0]
-            num += 1
-    # print(sum/num *100)
-    return body_avg_IoU, sum/num *100
-
+    return imgID_imgName_mapping_path, parts_locs_path, parts_mapping_path, bird_BB_path
 
 
 
