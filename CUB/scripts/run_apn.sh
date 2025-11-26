@@ -1,7 +1,9 @@
-python experiments.py cub Joint \
+rm -r outputs/test2/tensorboard
+
+python experiments.py cub APN \
     --seed 1 \
     -ckpt "" \
-    -log_dir outputs/ \
+    -log_dir outputs/test2 \
     -e 1000 \
     -optimizer sgd \
     -pretrained \
