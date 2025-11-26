@@ -53,6 +53,8 @@ class CUBDataset(Dataset):
         try:
             idx = img_path.split('/').index('CUB_200_2011')
             if self.image_dir != 'images':
+                img_path = '/'.join([self.image_dir] + img_path.split('/')[idx+1:])
+                img_path = img_path.replace('images/', '')
                 if "images" in self.image_dir:
                     img_path = '/'.join([self.image_dir] + img_path.split('/')[idx+2:])
                 else:
@@ -230,6 +232,8 @@ class ImbalancedDatasetSampler(torch.utils.data.sampler.Sampler):
 
     def __len__(self):
         return self.num_samples
+    
+
 
 def load_data(pkl_paths, use_attr, no_img, batch_size, uncertain_label=False, n_class_attr=2, image_dir='images', resampling=False, resol=299):
     """
@@ -317,7 +321,6 @@ def find_class_imbalance(pkl_file, multiple_attr=False, attr_idx=-1):
                 n_ones[0] += sum(labels)
     for j in range(len(n_ones)):
         imbalance_ratio.append(total[j]/n_ones[j] - 1)
-        
     if not multiple_attr: #e.g. [9.0] --> [9.0] * 312
         imbalance_ratio *= n_attr
     return imbalance_ratio

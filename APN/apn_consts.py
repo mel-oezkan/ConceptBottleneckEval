@@ -78,3 +78,5 @@ CUB_SELECTED_ATTRIBUTES_PER_GROUP = {
 # GROUPS AS DEFINED BY APN
 CUB_GROUPS = ['head', 'belly', 'breast', 'back', 'wing', 'tail', 'leg', 'others']
 """
+
+NUM_ATTRIBUTES = 112

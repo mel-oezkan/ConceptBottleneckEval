@@ -2,7 +2,6 @@
 Train InceptionV3 Network using the CUB-200-2011 dataset
 """
 
-import pdb
 import os
 import sys
 import argparse
@@ -37,6 +36,7 @@ from CUB.models import (
     ModelXtoC,
     ModelOracleCtoY,
     ModelXtoCtoY,
+    ModelXtoPrototoY,
 )
 
 from torch.utils.tensorboard import SummaryWriter
@@ -76,7 +76,7 @@ def run_epoch_simple(
     return loss_meter, acc_meter
 
 
-def run_epoch(
+def run_epoch_proto(
     model: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
     loader: torch.utils.data.DataLoader,
@@ -99,7 +99,6 @@ def run_epoch(
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     for _, data in enumerate(loader):
-        #! wann ist das überhaupt ein Fall?
         if attr_criterion is None and protomod_criterion is None:
             inputs, labels = data
             attr_labels, attr_labels_var = None, None
@@ -108,7 +107,6 @@ def run_epoch(
             if args.n_attributes > 1:
                 # attributes
                 attr_labels = torch.stack(attr_labels, dim=1).float()
-                # print(attr_labels.shape)
             else:
                 if isinstance(attr_labels, list):
                     attr_labels = attr_labels[0]
@@ -160,6 +158,7 @@ def run_epoch(
             log_losses.append(cpt_loss)
             log_losses.append(decorrelation_loss)
         else:  # testing or no aux logits
+            # Evaluation mode
             (
                 outputs,
                 similarity_scores,
@@ -199,6 +198,7 @@ def run_epoch(
             sigmoid_outputs = torch.nn.Sigmoid()(torch.cat(outputs, dim=1))
             acc = binary_accuracy(sigmoid_outputs, attr_labels)
             acc_meter.update(acc.data.cpu().numpy(), inputs.size(0))
+
         else:
             acc = accuracy(
                 outputs[0], labels, topk=(1,)
@@ -216,13 +216,136 @@ def run_epoch(
                     )
         else:  # finetune
             total_loss = sum(losses)
+
         loss_meter.update(np.array([
             total_loss.item(), log_losses[0], log_losses[1], log_losses[2], log_losses[3]
         ]), inputs.size(0))
+
         if is_training:
             optimizer.zero_grad()
             total_loss.backward()
             optimizer.step()
+
+    return loss_meter, acc_meter
+
+
+def run_epoch(
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    loader: torch.utils.data.DataLoader,
+    loss_meter,
+    acc_meter,
+    criterion,
+    attr_criterion,
+    args: argparse.Namespace,
+    is_training: bool,
+):
+    """
+    For the rest of the networks (X -> A, cotraining, simple finetune)
+    """
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    if is_training:
+        model.train()
+    else:
+        model.eval()
+
+    for _, data in enumerate(loader):
+        if attr_criterion is None:
+            inputs, labels = data
+            attr_labels, attr_labels_var = None, None
+        else:
+            inputs, labels, attr_labels = data
+            if args.n_attributes > 1:
+                # attributes
+                attr_labels = torch.stack(attr_labels, dim=1).float()
+            else:
+                if isinstance(attr_labels, list):
+                    attr_labels = attr_labels[0]
+                attr_labels = attr_labels.unsqueeze(1).float()
+
+            attr_labels_var = attr_labels.to(device)
+
+        inputs_var = inputs.to(device)
+        labels_var = labels.to(device)
+        if is_training and args.use_aux:
+            outputs, aux_outputs = model(inputs_var)
+            losses = []
+            out_start = 0
+            if (
+                not args.bottleneck
+            ):  # loss main is for the main task label (always the first output)
+                loss_main = 1.0 * criterion(outputs[0], labels_var) + 0.4 * criterion(
+                    aux_outputs[0], labels_var
+                )
+                losses.append(loss_main)
+                out_start = 1
+            if (
+                attr_criterion is not None and args.attr_loss_weight > 0
+            ):  # X -> A, cotraining, end2end
+                for i in range(len(attr_criterion)):
+                    losses.append(
+                        args.attr_loss_weight
+                        * (
+                            1.0
+                            * attr_criterion[i](
+                                outputs[i + out_start].squeeze(),
+                                attr_labels_var[:, i],
+                            )
+                            + 0.4
+                            * attr_criterion[i](
+                                aux_outputs[i + out_start].squeeze(),
+                                attr_labels_var[:, i],
+                            )
+                        )
+                    )
+        else:  # testing or no aux logits
+            outputs = model(inputs_var)
+            losses = []
+            out_start = 0
+            if not args.bottleneck:
+                loss_main = criterion(outputs[0], labels_var)
+                losses.append(loss_main)
+                out_start = 1
+            if (
+                attr_criterion is not None and args.attr_loss_weight > 0
+            ):  # X -> A, cotraining, end2end
+                for i in range(len(attr_criterion)):
+                    losses.append(
+                        args.attr_loss_weight
+                        * attr_criterion[i](
+                            outputs[i + out_start].squeeze(),
+                            attr_labels_var[:, i],
+                        )
+                    )
+
+        if args.bottleneck:  # attribute accuracy
+            sigmoid_outputs = torch.nn.Sigmoid()(torch.cat(outputs, dim=1))
+            acc = binary_accuracy(sigmoid_outputs, attr_labels)
+            acc_meter.update(acc.data.cpu().numpy(), inputs.size(0))
+        else:
+            acc = accuracy(
+                outputs[0], labels, topk=(1,)
+            )  # only care about class prediction accuracy
+            acc_meter.update(acc[0], inputs.size(0))
+
+        if attr_criterion is not None:
+            if args.bottleneck:
+                total_loss = sum(losses) / args.n_attributes
+            else:  # cotraining, loss by class prediction and loss by attribute prediction have the same weight
+                total_loss = losses[0] + sum(losses[1:])
+                if args.normalize_loss:
+                    total_loss = total_loss / (
+                        1 + args.attr_loss_weight * args.n_attributes
+                    )
+        else:  # finetune
+            total_loss = sum(losses)
+        loss_meter.update(total_loss.item(), inputs.size(0))
+        if is_training:
+            optimizer.zero_grad()
+            total_loss.backward()
+            optimizer.step()
+
     return loss_meter, acc_meter
 
 
@@ -253,29 +376,25 @@ def train(model, args):
 
     model = model.to(device)
     criterion = torch.nn.CrossEntropyLoss()
-    # if args.use_attr and not args.no_img:
-    #     attr_criterion = [] #separate criterion (loss function) for each attribute
-    #     if args.weighted_loss:
-    #         assert(imbalance is not None)
-    #         for ratio in imbalance:
-    #             attr_criterion.append(torch.nn.BCEWithLogitsLoss(weight=torch.FloatTensor([ratio]).cuda()))
-    #     else:
-    #         for i in range(args.n_attributes):
-    #             attr_criterion.append(torch.nn.CrossEntropyLoss())
-    # else:
-    attr_criterion = None
 
-    # Weights from the APN paper
-    reg_weights = {
-        "attribute_reg": 1.0,
-        "cpt": 1e-7,
-        "decorrelation": 5e-2,
-    }
-    use_groups = True
-    protomod_criterion = ProtoModLoss(model.protomod, reg_weights, use_groups)
-
-    # For nice logging of individual losses
+    
     loss_labels = ["total_loss", "classification_loss", "attribute_reg_loss", "cpt_loss", "decorrelation_loss"]
+    attr_criterion = None
+    if not model.__class__.__name__ == "ProtoEnd2End":
+        #! only when not apn
+        if args.use_attr and not args.no_img:
+            attr_criterion = []  # separate criterion (loss function) for each attribute
+            if args.weighted_loss:
+                assert imbalance is not None
+                for ratio in imbalance:
+                    attr_criterion.append(
+                        torch.nn.BCEWithLogitsLoss(
+                            weight=torch.FloatTensor([ratio]).to(device)
+                        )
+                    )
+            else:
+                for i in range(args.n_attributes):
+                    attr_criterion.append(torch.nn.CrossEntropyLoss())
 
     if args.optimizer == "Adam":
         optimizer = torch.optim.Adam(
@@ -311,6 +430,7 @@ def train(model, args):
     logger.write("train data path: %s\n" % train_data_path)
 
     if args.ckpt:  # retraining
+        #! können wir eigentlich auch löschen
         train_loader = load_data(
             [train_data_path, val_data_path],
             args.use_attr,
@@ -348,8 +468,10 @@ def train(model, args):
 
     for epoch in range(0, args.epochs):
         start_time = time.time()
-        train_loss_meter = LossMeter(loss_labels)
         train_acc_meter = AverageMeter()
+        train_loss_meter = AverageMeter()
+
+
         if args.no_img:
             train_loss_meter, train_acc_meter = run_epoch_simple(
                 model,
@@ -362,59 +484,109 @@ def train(model, args):
                 is_training=True,
             )
         else:
-            train_loss_meter, train_acc_meter = run_epoch(
-                model,
-                optimizer,
-                train_loader,
-                train_loss_meter,
-                train_acc_meter,
-                criterion,
-                attr_criterion,
-                protomod_criterion,
-                args,
-                is_training=True,
-            )
+            if model.__class__.__name__ == "ProtoEnd2End":
+                train_loss_meter = LossMeter(loss_labels)
 
-        for i in range(train_loss_meter.n_losses):
-            tb_writer.add_scalar(f"Train/{loss_labels[i]}", train_loss_meter.avg[i], epoch)
-        tb_writer.add_scalar("Train/Accuracy", train_acc_meter.avg, epoch)
-
-        val_loss_meter = LossMeter(loss_labels)
-        val_acc_meter = AverageMeter()
-
-        with torch.no_grad():
-            if args.no_img:
-                val_loss_meter, val_acc_meter = run_epoch_simple(
-                    model,
-                    optimizer,
-                    val_loader,
-                    val_loss_meter,
-                    val_acc_meter,
-                    criterion,
-                    args,
-                    is_training=False,
+                protomod_criterion = ProtoModLoss(
+                    model.protomod, args
                 )
-            else:
-                val_loss_meter, val_acc_meter = run_epoch(
+
+                train_loss_meter, train_acc_meter = run_epoch_proto(
                     model,
                     optimizer,
-                    val_loader,
-                    val_loss_meter,
-                    val_acc_meter,
+                    train_loader,
+                    train_loss_meter,
+                    train_acc_meter,
                     criterion,
                     attr_criterion,
                     protomod_criterion,
                     args,
-                    is_training=False,
+                    is_training=True,
+                )
+                for i in range(train_loss_meter.n_losses):
+                    tb_writer.add_scalar(f"Train/{loss_labels[i]}", train_loss_meter.avg[i], epoch)
+
+            else:
+
+                train_loss_meter, train_acc_meter = run_epoch(
+                    model,
+                    optimizer,
+                    train_loader,
+                    train_loss_meter,
+                    train_acc_meter,
+                    criterion,
+                    attr_criterion,
+                    args,
+                    is_training=True,
                 )
 
-        for i in range(val_loss_meter.n_losses):
-            tb_writer.add_scalar(f"Val/{loss_labels[i]}", val_loss_meter.avg[i], epoch)
-        tb_writer.add_scalar("Val/Accuracy", val_acc_meter.avg, epoch)
+                tb_writer.add_scalar("Loss/train", train_loss_meter.avg, epoch)
+        tb_writer.add_scalar("Accuracy/train", train_acc_meter.avg.item(), epoch)
+
+        if not args.ckpt:  # evaluate on val set
+            val_loss_meter = AverageMeter()
+            val_acc_meter = AverageMeter()
+
+            with torch.no_grad():
+                if args.no_img:
+                    val_loss_meter, val_acc_meter = run_epoch_simple(
+                        model,
+                        optimizer,
+                        val_loader,
+                        val_loss_meter,
+                        val_acc_meter,
+                        criterion,
+                        args,
+                        is_training=False,
+                    )
+                
+                    tb_writer.add_scalar("Loss/val", val_loss_meter.avg, epoch)
+            
+                else:
+                    if model.__class__.__name__ == "ProtoEnd2End":
+                        val_loss_meter = LossMeter(loss_labels)
+
+                        protomod_criterion = ProtoModLoss(
+                            model.protomod, args
+                        )
+                        print("Running protomod")
+
+                        train_loss_meter, train_acc_meter = run_epoch_proto(
+                            model,
+                            optimizer,
+                            val_loader,
+                            val_loss_meter,
+                            val_acc_meter,
+                            criterion,
+                            attr_criterion,
+                            protomod_criterion,
+                            args,
+                            is_training=False,
+                        )
+
+                        for i in range(val_loss_meter.n_losses):
+                            tb_writer.add_scalar(f"Val/{loss_labels[i]}", val_loss_meter.avg[i], epoch)
+                    else:
+                        val_loss_meter, val_acc_meter = run_epoch(
+                            model,
+                            optimizer,
+                            val_loader,
+                            val_loss_meter,
+                            val_acc_meter,
+                            criterion,
+                            attr_criterion,
+                            args,
+                            is_training=False,
+                        )
+                
+                        tb_writer.add_scalar("Loss/val", val_loss_meter.avg, epoch)
+
+        tb_writer.add_scalar("Accuracy/val", val_acc_meter.avg, epoch)
 
         if best_val_acc < val_acc_meter.avg:
             best_val_epoch = epoch
             best_val_acc = val_acc_meter.avg
+
             logger.write("New model best model at epoch %d\n" % epoch)
             torch.save(
                 model, os.path.join(args.log_dir, "best_model_%d.pth" % args.seed)
@@ -424,26 +596,42 @@ def train(model, args):
         val_loss_avg = val_loss_meter.avg
 
         time_duration = time.time() - start_time
-        logger.write(
-            " - ".join([
-                datetime.now().strftime("%H:%M:%S"),
-                f"Epoch [{epoch}]",
-                *[
-                    f"Train/{loss_labels[i]}: {train_loss_meter.avg[i]:.4f}"
-                    for i in range(train_loss_meter.n_losses)
-                ],
-                f"Train/acc: {train_acc_meter.avg.item():.4f}",
-                *[
-                    f"Val/{loss_labels[i]}: {val_loss_meter.avg[i]:.4f}"
-                    for i in range(val_loss_meter.n_losses)
-                ],
-                f"Val/acc: {val_acc_meter.avg.item():.4f}",
-                f"Best val epoch: {best_val_epoch}",
-                f"Time: {time_duration:.2f} sec",
-                "\n"
-            ])
-        )
+        if model.__class__.__name__ == "ProtoEnd2End":
 
+            logger.write(
+                " - ".join(
+                    [
+                        datetime.now().strftime("%H:%M:%S"),
+                        f"Epoch [{epoch}]",
+                        f"Train/loss: {train_loss_avg:.4f}",
+                        f"Train/acc: {train_acc_meter.avg.item():.4f}",
+                        f"Val/loss: {val_loss_avg:.4f}",
+                        f"Val/acc: {val_acc_meter.avg.item():.4f}"
+                        f"Best val epoch: {best_val_epoch}",
+                        f"Time: {time_duration:.2f} sec",
+                    ]
+                )
+            )
+        else:
+            logger.write(
+                " - ".join([
+                    datetime.now().strftime("%H:%M:%S"),
+                    f"Epoch [{epoch}]",
+                    *[
+                        f"Train/{loss_labels[i]}: {train_loss_meter.avg[i]:.4f}"
+                        for i in range(train_loss_meter.n_losses)
+                    ],
+                    f"Train/acc: {train_acc_meter.avg.item():.4f}",
+                    *[
+                        f"Val/{loss_labels[i]}: {val_loss_meter.avg[i]:.4f}"
+                        for i in range(val_loss_meter.n_losses)
+                    ],
+                    f"Val/acc: {val_acc_meter.avg.item():.4f}",
+                    f"Best val epoch: {best_val_epoch}",
+                    f"Time: {time_duration:.2f} sec",
+                    "\n"
+                ])
+            )
         logger.flush()
 
         if epoch <= stop_epoch:
@@ -462,8 +650,27 @@ def train(model, args):
             print("Early stopping because acc hasn't improved for a long time")
             break
 
+    # For hyperparameter search
+    return best_val_acc
 
-def train_X_to_C(args):
+
+def train_X_to_Proto_to_Y(args) -> float:
+    model = ModelXtoPrototoY(
+        n_class_attr=args.n_class_attr,
+        pretrained=args.pretrained,
+        freeze=args.freeze,
+        num_classes=N_CLASSES,
+        use_aux=args.use_aux,
+        n_attributes=args.n_attributes,
+        expand_dim=args.expand_dim,
+        use_relu=args.use_relu,
+        use_sigmoid=args.use_sigmoid,
+        num_vectors=args.proto_n_vectors,
+    )
+    return train(model, args)
+
+
+def train_X_to_C(args) -> float:
     model = ModelXtoC(
         pretrained=args.pretrained,
         freeze=args.freeze,
@@ -472,18 +679,19 @@ def train_X_to_C(args):
         n_attributes=args.n_attributes,
         expand_dim=args.expand_dim,
         three_class=args.three_class,
+        arch=args.arch,
     )
-    train(model, args)
+    return train(model, args)
 
 
-def train_oracle_C_to_y_and_test_on_Chat(args):
+def train_oracle_C_to_y_and_test_on_Chat(args) -> float:
     model = ModelOracleCtoY(
         n_class_attr=args.n_class_attr,
         n_attributes=args.n_attributes,
         num_classes=N_CLASSES,
         expand_dim=args.expand_dim,
     )
-    train(model, args)
+    return train(model, args)
 
 
 def train_Chat_to_y_and_test_on_Chat(args):
@@ -496,7 +704,7 @@ def train_Chat_to_y_and_test_on_Chat(args):
     train(model, args)
 
 
-def train_X_to_C_to_y(args):
+def train_X_to_C_to_y(args) -> float:
     model = ModelXtoCtoY(
         n_class_attr=args.n_class_attr,
         pretrained=args.pretrained,
@@ -507,21 +715,23 @@ def train_X_to_C_to_y(args):
         expand_dim=args.expand_dim,
         use_relu=args.use_relu,
         use_sigmoid=args.use_sigmoid,
+        arch=args.arch,
     )
-    train(model, args)
+    return train(model, args)
 
 
-def train_X_to_y(args):
+def train_X_to_y(args) -> float:
     model = ModelXtoY(
         pretrained=args.pretrained,
         freeze=args.freeze,
         num_classes=N_CLASSES,
         use_aux=args.use_aux,
+        arch=args.arch,
     )
-    train(model, args)
+    return train(model, args)
 
 
-def train_X_to_Cy(args):
+def train_X_to_Cy(args) -> float:
     model = ModelXtoCY(
         pretrained=args.pretrained,
         freeze=args.freeze,
@@ -530,8 +740,9 @@ def train_X_to_Cy(args):
         n_attributes=args.n_attributes,
         three_class=args.three_class,
         connect_CY=args.connect_CY,
+        arch=args.arch,
     )
-    train(model, args)
+    return train(model, args)
 
 
 def train_probe(args):
@@ -550,7 +761,7 @@ def hyperparameter_optimization(args):
     hyperopt.run(args)
 
 
-def parse_arguments(experiment):
+def parse_arguments(experiment, arguments = None):
     # Get argparse configs from user
     parser = argparse.ArgumentParser(description="CUB Training")
     parser.add_argument("dataset", type=str, help="Name of the dataset.")
@@ -568,6 +779,7 @@ def parse_arguments(experiment):
             "TTI",
             "Robustness",
             "HyperparameterSearch",
+            "APN",
         ],
         help="Name of experiment to run.",
     )
@@ -716,10 +928,47 @@ def parse_arguments(experiment):
             help="Whether to use concepts as auxiliary features (in multitasking) to predict Y",
         )
         parser.add_argument(
+            "-arch",
+            type=str,
+            default="inception",
+            help="Backbone architecture to use: inception / vgg",
+        )
+        parser.add_argument(
             "--device",
             default="cuda",
             help="Determines the device the model is supposed to run on.",
         )
-        args = parser.parse_args()
+        # Protomod specific arguments
+        parser.add_argument(
+            "-proto_n_vectors",
+            type=int,
+            default=1,
+            help="Number of prototype vectors per attribute in ProtoMod.",
+        )
+        parser.add_argument(
+            "-proto_use_groups",
+            action="store_true",
+            help="Whether to apply regularization per group in ProtoMod."
+        )
+        parser.add_argument(
+            "-proto_weight_attribute_reg",
+            type=float,
+            default=1.0,
+            help="Weight for attribute regularization in ProtoMod.",
+        )
+        parser.add_argument(
+            "-proto_weight_cpt",
+            type=float,
+            default=1e-9,
+            help="Weight for concept prototype regularization in ProtoMod.",
+        )
+        parser.add_argument(
+            "-proto_weight_decorrelation",
+            type=float,
+            default=4e-2,
+            help="Weight for decorrelation regularization in ProtoMod.",
+        )
+
+        args = parser.parse_args(arguments)
         args.three_class = args.n_class_attr == 3
-        return (args,)
+        return args

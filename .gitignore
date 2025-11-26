@@ -14,4 +14,5 @@ CUB/pretrained
 uv.lock
 pyproject.toml
 */__pycache__
+pretrained
 __pycache__
