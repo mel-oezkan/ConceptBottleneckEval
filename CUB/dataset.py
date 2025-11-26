@@ -14,6 +14,7 @@ from torch.utils.data import BatchSampler
 from torch.utils.data import Dataset, DataLoader
 
 
+
 class CUBDataset(Dataset):
     """
     Returns a compatible Torch Dataset object customized for the CUB dataset
@@ -53,8 +54,6 @@ class CUBDataset(Dataset):
         try:
             idx = img_path.split('/').index('CUB_200_2011')
             if self.image_dir != 'images':
-                img_path = '/'.join([self.image_dir] + img_path.split('/')[idx+1:])
-                img_path = img_path.replace('images/', '')
                 if "images" in self.image_dir:
                     img_path = '/'.join([self.image_dir] + img_path.split('/')[idx+2:])
                 else:
@@ -275,7 +274,7 @@ def load_data(pkl_paths, use_attr, no_img, batch_size, uncertain_label=False, n_
         loader = DataLoader(
             dataset, 
             batch_sampler=sampler,
-            num_workers=4,  # Multi-process data loading
+            num_workers=2,  # Multi-process data loading
             pin_memory=True,  # Faster GPU transfer
             persistent_workers=True,  # Keep workers alive between epochs
         )
@@ -285,7 +284,7 @@ def load_data(pkl_paths, use_attr, no_img, batch_size, uncertain_label=False, n_
             batch_size=batch_size, 
             shuffle=shuffle, 
             drop_last=drop_last,
-            num_workers=4,  # Multi-process data loading
+            num_workers=2,  # Multi-process data loading
             pin_memory=True,  # Faster GPU transfer
             persistent_workers=True,  # Keep workers alive between epochs
         )

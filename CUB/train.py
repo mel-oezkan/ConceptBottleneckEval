@@ -472,7 +472,6 @@ def train(model, args):
         train_acc_meter = AverageMeter()
         train_loss_meter = AverageMeter()
 
-
         if args.no_img:
             train_loss_meter, train_acc_meter = run_epoch_simple(
                 model,
@@ -552,7 +551,7 @@ def train(model, args):
                         )
                         print("Running protomod")
 
-                        train_loss_meter, train_acc_meter = run_epoch_proto(
+                        val_loss_meter, val_acc_meter = run_epoch_proto(
                             model,
                             optimizer,
                             val_loader,
@@ -598,22 +597,6 @@ def train(model, args):
 
         time_duration = time.time() - start_time
         if model.__class__.__name__ == "ProtoEnd2End":
-
-            logger.write(
-                " - ".join(
-                    [
-                        datetime.now().strftime("%H:%M:%S"),
-                        f"Epoch [{epoch}]",
-                        f"Train/loss: {train_loss_avg:.4f}",
-                        f"Train/acc: {train_acc_meter.avg.item():.4f}",
-                        f"Val/loss: {val_loss_avg:.4f}",
-                        f"Val/acc: {val_acc_meter.avg.item():.4f}"
-                        f"Best val epoch: {best_val_epoch}",
-                        f"Time: {time_duration:.2f} sec",
-                    ]
-                )
-            )
-        else:
             logger.write(
                 " - ".join([
                     datetime.now().strftime("%H:%M:%S"),
@@ -632,6 +615,21 @@ def train(model, args):
                     f"Time: {time_duration:.2f} sec",
                     "\n"
                 ])
+            )
+        else:
+             logger.write(
+                " - ".join(
+                    [
+                        datetime.now().strftime("%H:%M:%S"),
+                        f"Epoch [{epoch}]",
+                        f"Train/loss: {train_loss_avg:.4f}",
+                        f"Train/acc: {train_acc_meter.avg.item():.4f}",
+                        f"Val/loss: {val_loss_avg:.4f}",
+                        f"Val/acc: {val_acc_meter.avg.item():.4f}"
+                        f"Best val epoch: {best_val_epoch}",
+                        f"Time: {time_duration:.2f} sec",
+                    ]
+                )
             )
         logger.flush()
 
