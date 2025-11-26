@@ -19,7 +19,8 @@ import torch
 import numpy as np
 from analysis import Logger, AverageMeter, accuracy, binary_accuracy, LossMeter
 
-from CUB import probe, tti, gen_cub_synthetic, hyperopt
+from CUB import probe, tti, hyperopt
+# from CUB import gen_cub_synthetic
 from CUB.dataset import load_data, find_class_imbalance
 from CUB.config import (
     BASE_DIR,
@@ -753,8 +754,8 @@ def test_time_intervention(args):
     tti.run(args)
 
 
-def robustness(args):
-    gen_cub_synthetic.run(args)
+# def robustness(args):
+#     gen_cub_synthetic.run(args)
 
 
 def hyperparameter_optimization(args):
@@ -791,8 +792,8 @@ def parse_arguments(experiment, arguments = None):
     elif experiment == "TTI":
         return (tti.parse_arguments(parser),)
 
-    elif experiment == "Robustness":
-        return (gen_cub_synthetic.parse_arguments(parser),)
+    # elif experiment == "Robustness":
+    #     return (gen_cub_synthetic.parse_arguments(parser),)
 
     elif experiment == "HyperparameterSearch":
         return (hyperopt.parse_arguments(parser),)

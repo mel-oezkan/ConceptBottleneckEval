@@ -12,7 +12,7 @@ from CUB.train import (
     # train_X_to_y_with_aux_C,
     train_probe,
     test_time_intervention,
-    robustness,
+    # robustness,
     hyperparameter_optimization,
 )
 
@@ -50,8 +50,8 @@ def run_experiments(dataset, args):
     elif experiment == "TTI":
         return test_time_intervention(args)
 
-    elif experiment == "Robustness":
-        robustness(args)
+    # elif experiment == "Robustness":
+    #     robustness(args)
 
     elif experiment == "HyperparameterSearch":
         hyperparameter_optimization(args)
