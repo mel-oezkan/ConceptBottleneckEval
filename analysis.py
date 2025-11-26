@@ -280,6 +280,30 @@ class AverageMeter(object):
         self.sum += val * n
         self.count += n
         self.avg = self.sum / self.count
+    
+class LossMeter(object):
+    """
+    Computes and stores the average and current value for multiple losses.
+    """
+
+    def __init__(self, loss_labels):
+        self.loss_labels = loss_labels
+        self.n_losses = len(loss_labels)
+        self.reset()
+
+    def reset(self):
+        self.val = np.array([0. for _ in range(self.n_losses)])
+        self.avg = np.array([0. for _ in range(self.n_losses)])
+        self.sum = np.array([0. for _ in range(self.n_losses)])
+        self.count = 0
+
+    def update(self, val, n=1):
+        assert len(val) == len(self.loss_labels), "Loss labels and loss values must be of same length."
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
+
 
 def accuracy(output, target, topk=(1,)):
     """
@@ -290,9 +314,9 @@ def accuracy(output, target, topk=(1,)):
     batch_size = target.size(0)
     _, pred = output.topk(maxk, 1, True, True)
     pred = pred.t()
+
     temp = target.view(1, -1).expand_as(pred)
-    temp = temp.cuda()
-    correct = pred.eq(temp)
+    correct = pred.eq(temp.to(output.device))
 
     res = []
     for k in topk:

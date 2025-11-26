@@ -1,7 +1,5 @@
 # Concept Bottleneck Models
 
-![teaser](https://github.com/yewsiang/ConceptBottleneck/blob/master/figures/teaser_landscape.png)
-
 This repository contains code and scripts for the following paper:
 
 > Concept Bottleneck Models
@@ -33,8 +31,6 @@ by editing their predicted concept values and propagating these changes to the f
 On x-ray grading and bird identification, concept bottleneck models achieve competitive accuracy with standard end-to-end models,
 while enabling interpretation in terms of high-level clinical concepts ("bone spurs") or bird attributes ("wing color").
 These models also allow for richer human-model interaction: accuracy improves significantly if we can correct model mistakes on concepts at test time.
-
-![teaser](https://github.com/yewsiang/ConceptBottleneck/blob/master/figures/tti_qual_examples.png)
 
 ## Prerequisites
 We used the same environment as Codalab's default gpu setting, please run `pip install -r requirements.txt`. Main packages are:

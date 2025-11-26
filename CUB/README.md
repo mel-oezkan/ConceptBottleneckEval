@@ -6,6 +6,7 @@ OR) You can get `CUB_processed` from Step 1. above with the following steps
 1) Run `data_processing.py` to obtain train/ val/ test splits as well as to extract all relevant task and concept metadata into pickle files. 
 2) Run `generate_new_data.py` to obtain other versions of training data (class-level attributes, few-shot training, etc.) from the metadata.
 ## Experiments
+
 1) Update the paths (e.g. `BASE_DIR`, `-log_dir`, `-out_dir`, `--model_path`) in the scripts (where applicable) to point to your dataset and outputs.
 2) Run the scripts below to get the results for 1 seed. Change the seed values and corresponding file names to get results for more seeds.
 3) All of the scripts together with different seeds are available in `scripts/experiments.sh`, read it to get a complete picture of the experiments. 
@@ -14,9 +15,8 @@ OR) You can get `CUB_processed` from Step 1. above with the following steps
 ### a. Task and concept tables (Table 1 and 2)
 ##### 0. APN Integration
 ```
-python experiments.py cub Joint --seed 1 -ckpt 1 -log_dir outputs/ -e 1000 -optimizer sgd -pretrained -use_aux -use_attr -weighted_loss multiple -data_dir data/CUB_processed/class_attr_data_10 -n_attributes 312 -attr_loss_weight 1 -normalize_loss -b 64 -weight_decay 0.00004 -lr 0.01 -scheduler_step 1000 -end2end
+python experiments.py cub Joint --seed 1 -ckpt 1 -log_dir outputs/ -e 1000 -optimizer sgd -pretrained -use_aux -use_attr -weighted_loss multiple -data_dir data/CUB_processed/class_attr_data_10 -n_attributes 312 -attr_loss_weight 1 -normalize_loss -b 64 -weight_decay 0.00004 -lr 0.01 -scheduler_step 1000 -end2end -proto_n_vectors 5
 ```
-
 ##### 1. Independent
 Train the x -> c model and extract the predicted c logits:
 ```
