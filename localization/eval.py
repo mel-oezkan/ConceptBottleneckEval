@@ -2,6 +2,7 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
+from APN.apn_consts import MAP_APN_GROUPS_TO_CUB_ATTRIBUTE_IDS
 import cv2
 
 from statistics import mean
